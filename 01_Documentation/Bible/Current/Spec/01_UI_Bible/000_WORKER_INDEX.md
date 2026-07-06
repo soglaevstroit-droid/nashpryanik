@@ -2,7 +2,7 @@
 
 Version: 1.0
 
-Стек: HTML / CSS / JavaScript, Node.js / Express / SQLite.
+Стек: Flutter, HTML / CSS / JavaScript, Node.js / Express / PostgreSQL.
 
 Правило: все экраны должны соответствовать утвержденным референсам минимум на 95%.
 

@@ -17,9 +17,10 @@
 
 ## Стек
 
+- Flutter
 - Node.js
 - Express
-- SQLite
+- PostgreSQL
 - HTML
 - CSS
 - JavaScript

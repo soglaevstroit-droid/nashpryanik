@@ -10,13 +10,14 @@
 
 00_Project — цели, роли, границы MVP  
 01_UI_Bible — все экраны и логика интерфейса  
+02_Architecture — архитектура системы и границы модулей  
 02_Design_System — цвета, типографика, компоненты  
 03_References — утвержденные референсы экранов  
-04_Database — структура базы данных  
-05_API — backend API  
+03_Database — структура PostgreSQL-базы данных  
+04_API — REST API v1  
+05_Backend — сервисная архитектура backend  
 06_AI — логика ИИ-оценки и премий  
-07_Frontend — структура frontend  
-08_Backend — структура backend  
+06_Frontend — архитектура Flutter mobile-приложения  
 09_Testing — тесты и приемка  
 10_Codex — инструкции для Codex  
 11_Releases — история версий
