@@ -5,6 +5,8 @@ import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
 import { AppConfigService } from '../config/app-config.service.js';
 import { EventService } from '../events/event.service.js';
+import { EventController } from '../events/event.controller.js';
+import { ProcessController } from '../processes/process.controller.js';
 import { UserRecord } from '../users/user-record.js';
 import { UserService } from '../users/user.service.js';
 import { AuthRequest } from './auth-user.js';
@@ -192,6 +194,51 @@ test('roles guard allows matching role and rejects another role', () => {
   );
 });
 
+test('event controller allows finance read and rejects worker', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = EventController.prototype.listEvents as () => unknown;
+  const controller = EventController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('event controller allows foreman write and rejects finance write', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = EventController.prototype.createEvent as () => unknown;
+  const controller = EventController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('FOREMAN'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('process controller allows foreman and rejects worker', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = ProcessController.prototype.createProcess as () => unknown;
+  const controller = ProcessController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('FOREMAN'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
 function createHttpContext(
   request: AuthRequest,
   handler: () => unknown = () => undefined,
@@ -204,4 +251,15 @@ function createHttpContext(
     getHandler: () => handler,
     getClass: () => controller,
   } as unknown as ExecutionContext;
+}
+
+function createRequest(role: Role): AuthRequest {
+  return {
+    headers: {},
+    user: {
+      id: `user-${role}`,
+      email: `${role.toLowerCase()}@example.com`,
+      role,
+    },
+  };
 }

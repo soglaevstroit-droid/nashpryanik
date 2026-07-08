@@ -71,13 +71,19 @@ GET /api/v1/auth/me
 
 ## Event Foundation API
 
-Технические endpoints Event Engine доступны без auth только для проверки фундамента памяти компании:
+Технические endpoints Event Engine защищены JWT и RBAC:
 
 ```http
 POST /api/v1/events
 GET /api/v1/events
 GET /api/v1/events/:id
 ```
+
+Доступ:
+
+- `CREATOR`, `DIRECTOR`, `FOREMAN` — чтение и создание событий;
+- `FINANCE` — чтение событий;
+- `WORKER`, `PARTNER` — доступ к technical endpoints запрещен.
 
 Пример создания события:
 
@@ -100,7 +106,7 @@ GET /api/v1/events/:id
 
 ## Process Foundation API
 
-Технические endpoints Process Engine доступны без auth только для проверки жизненного цикла процесса:
+Технические endpoints Process Engine защищены JWT и RBAC:
 
 ```http
 POST /api/v1/processes
@@ -111,6 +117,11 @@ PATCH /api/v1/processes/:id/pause
 PATCH /api/v1/processes/:id/complete
 PATCH /api/v1/processes/:id/cancel
 ```
+
+Доступ:
+
+- `CREATOR`, `DIRECTOR`, `FOREMAN` — чтение и изменение технических процессов;
+- `FINANCE`, `WORKER`, `PARTNER` — доступ к technical process endpoints запрещен.
 
 Пример создания процесса:
 

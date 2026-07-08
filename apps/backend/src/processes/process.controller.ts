@@ -1,9 +1,14 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Roles } from '../auth/decorators/roles.decorator.js';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { CreateProcessDto } from './dto/create-process.dto.js';
 import { ProcessRecord } from './process-record.js';
 import { ProcessService } from './process.service.js';
 
 @Controller('api/v1/processes')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('CREATOR', 'DIRECTOR', 'FOREMAN')
 export class ProcessController {
   constructor(private readonly processes: ProcessService) {}
 
