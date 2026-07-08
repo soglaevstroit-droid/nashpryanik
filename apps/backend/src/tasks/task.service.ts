@@ -83,7 +83,7 @@ export class TaskService {
     const task = await this.prepareWorkerTransition(user, id, ['IN_PROGRESS'], 'send to review');
     const updated = await this.repository.update(task.id, { status: 'ON_REVIEW' });
 
-    await this.createTaskEvent(user, updated, 'TASK_UPDATED', 'TASK_SENT_TO_REVIEW');
+    await this.createTaskEvent(user, updated, 'TASK_SENT_TO_REVIEW', 'TASK_SENT_TO_REVIEW');
 
     return updated;
   }

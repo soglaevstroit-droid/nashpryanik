@@ -233,7 +233,7 @@ test('sends task to review', async () => {
   const task = await service.sendToReview(worker, 'task-1');
 
   assert.equal(task.status, 'ON_REVIEW');
-  assert.deepEqual(eventTypes, ['TASK_UPDATED']);
+  assert.deepEqual(eventTypes, ['TASK_SENT_TO_REVIEW']);
 });
 
 test('completes task and process', async () => {
