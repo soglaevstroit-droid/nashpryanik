@@ -1,1 +1,22 @@
 .DS_Store
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+.dart_tool/
+
+# Build output
+dist/
+build/
+coverage/
+
+# Logs
+*.log
+
+# IDE
+.idea/
+.vscode/
