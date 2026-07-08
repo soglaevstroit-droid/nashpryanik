@@ -8,11 +8,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - '${POSTGRES_PORT}:5432'
     volumes:
       - stroit_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,11 +23,11 @@ services:
     container_name: stroit-redis
     restart: unless-stopped
     ports:
-      - "${REDIS_PORT}:6379"
+      - '${REDIS_PORT}:6379'
     volumes:
       - stroit_redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,12 +42,12 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
-      - "${MINIO_API_PORT}:9000"
-      - "${MINIO_CONSOLE_PORT}:9001"
+      - '${MINIO_API_PORT}:9000'
+      - '${MINIO_CONSOLE_PORT}:9001'
     volumes:
       - stroit_minio_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      test: ['CMD-SHELL', 'curl -f http://localhost:9000/minio/health/live || exit 1']
       interval: 10s
       timeout: 5s
       retries: 5

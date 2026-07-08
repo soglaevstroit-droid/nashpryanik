@@ -19,4 +19,13 @@ export default [
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
+  {
+    files: ['scripts/**/*.mjs', 'eslint.config.mjs'],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+      },
+    },
+  },
 ];

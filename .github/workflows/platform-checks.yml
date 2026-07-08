@@ -22,7 +22,7 @@ jobs:
           node-version: 22
 
       - name: Install tooling
-        run: npm install
+        run: npm ci
 
       - name: Check required structure
         run: ./scripts/check-structure.sh

@@ -1,10 +1,10 @@
 name: stroit_mobile
 description: Flutter skeleton for the СТРОИТ.РФ mobile application.
-publish_to: "none"
+publish_to: 'none'
 version: 0.1.0+1
 
 environment:
-  sdk: ">=3.4.0 <4.0.0"
+  sdk: '>=3.4.0 <4.0.0'
 
 dependencies:
   flutter:

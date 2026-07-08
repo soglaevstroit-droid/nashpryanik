@@ -11,25 +11,27 @@ fi
 
 COMPOSE="docker compose --env-file $ENV_FILE -f infra/docker/docker-compose.yml"
 
+check_service() {
+  service="$1"
+  container="$2"
+
+  running="$($COMPOSE ps --status running --services "$service")"
+  if [ "$running" != "$service" ]; then
+    echo "$service is not running"
+    exit 1
+  fi
+
+  health="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}' "$container")"
+  if [ "$health" != "healthy" ] && [ "$health" != "running" ]; then
+    echo "$service health is $health"
+    exit 1
+  fi
+}
+
 $COMPOSE ps postgres redis minio
 
-POSTGRES_STATUS="$($COMPOSE ps --status running --services postgres)"
-REDIS_STATUS="$($COMPOSE ps --status running --services redis)"
-MINIO_STATUS="$($COMPOSE ps --status running --services minio)"
-
-if [ "$POSTGRES_STATUS" != "postgres" ]; then
-  echo "PostgreSQL is not running"
-  exit 1
-fi
-
-if [ "$REDIS_STATUS" != "redis" ]; then
-  echo "Redis is not running"
-  exit 1
-fi
-
-if [ "$MINIO_STATUS" != "minio" ]; then
-  echo "MinIO is not running"
-  exit 1
-fi
+check_service "postgres" "stroit-postgres"
+check_service "redis" "stroit-redis"
+check_service "minio" "stroit-minio"
 
 echo "Development services are running"

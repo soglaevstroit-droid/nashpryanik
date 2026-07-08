@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "Development platform foundation for СТРОИТ.РФ.",
+  "workspaces": [
+    "apps/backend"
+  ],
   "scripts": {
-    "format:check": "prettier --check .",
+    "format:check": "prettier --check \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \".github/**/*.yml\" \"apps/**/*.{json,md,ts,yaml}\" \"packages/**/*.md\" \"infra/**/*.{md,yml}\" \"scripts/**/*.{mjs,md}\" \"docs/**/*.md\" \"*.{json,mjs}\" \".*.jsonc\"",
     "lint": "eslint .",
-    "lint:md": "markdownlint-cli2 \"**/*.md\" \"!node_modules\"",
+    "lint:md": "markdownlint-cli2 \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \"apps/**/*.md\" \"packages/**/*.md\" \"infra/**/*.md\" \"scripts/**/*.md\" \"docs/**/*.md\"",
     "lint:yaml": "node scripts/validate-yaml.mjs"
   },
   "devDependencies": {

@@ -4,7 +4,17 @@
 
 Этот репозиторий подготовлен для разработки без прикладного кода приложения. На текущем этапе поднимаются только инфраструктурные сервисы: PostgreSQL, Redis и MinIO.
 
-## Быстрый старт
+## Local Development
+
+### Подготовка
+
+```bash
+npm ci
+```
+
+Команда устанавливает tooling из `package-lock.json`. Backend-зависимости NestJS зафиксированы через npm workspace `apps/backend`.
+
+### Быстрый старт
 
 ```bash
 make up
@@ -12,25 +22,25 @@ make up
 
 Команда использует `.env`, если файл существует. Если `.env` еще не создан, используются безопасные значения из `.env.example`.
 
-## Остановить сервисы
+### Остановить сервисы
 
 ```bash
 make down
 ```
 
-## Посмотреть логи
+### Посмотреть логи
 
 ```bash
 make logs
 ```
 
-## Проверить статус
+### Проверить статус
 
 ```bash
 make status
 ```
 
-## Сбросить окружение
+### Сбросить окружение
 
 ```bash
 make reset
@@ -38,7 +48,7 @@ make reset
 
 Команда останавливает сервисы, удаляет volumes и запускает их заново.
 
-## Полная очистка
+### Полная очистка
 
 ```bash
 make clean
@@ -46,13 +56,25 @@ make clean
 
 Команда останавливает контейнеры и удаляет volumes.
 
-## Healthcheck
+### Healthcheck
 
 ```bash
 ./scripts/healthcheck.sh
 ```
 
 Проверяет доступность контейнеров PostgreSQL, Redis и MinIO через Docker Compose.
+
+### Локальная проверка платформы
+
+```bash
+./scripts/check-structure.sh
+npm run lint
+npm run lint:md
+npm run lint:yaml
+npm run format:check
+```
+
+Если Docker недоступен в текущем окружении, используйте `LOCAL_VERIFICATION_CHECKLIST.md` на машине разработчика с установленным Docker Desktop.
 
 ## Структура проекта
 
