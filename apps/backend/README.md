@@ -22,6 +22,8 @@
 - Prisma/PostgreSQL database foundation;
 - Event Engine foundation;
 - Process Engine foundation;
+- Authentication foundation;
+- RBAC foundation;
 - `GET /health`;
 - `GET /health/ready`;
 - минимальный тест health controller.
@@ -38,6 +40,34 @@ npm run prisma:migrate
 npm run prisma:studio
 npm run backend:db:check
 ```
+
+## Auth Foundation API
+
+Authentication endpoints:
+
+```http
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+GET /api/v1/auth/me
+```
+
+`register` и `login` возвращают JWT access token и публичные данные пользователя без `passwordHash`.
+
+Минимальные роли RBAC:
+
+- `CREATOR`
+- `DIRECTOR`
+- `FINANCE`
+- `FOREMAN`
+- `WORKER`
+- `PARTNER`
+
+Пароль хранится только как PBKDF2 hash с солью. Refresh tokens, logout и password reset не реализованы в этой миссии, чтобы не усложнять MVP foundation.
+
+Значимые auth/user действия создают события:
+
+- `USER_CREATED` при регистрации;
+- `USER_LOGGED_IN` при успешном входе.
 
 ## Event Foundation API
 

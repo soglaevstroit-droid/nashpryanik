@@ -8,11 +8,13 @@ export interface AppConfig {
   environment: AppEnvironment;
   port: number;
   databaseUrl: string;
+  jwtSecret: string;
 }
 
 const allowedEnvironments = new Set<AppEnvironment>(['development', 'test', 'production']);
 const fallbackDatabaseUrl =
   'postgresql://stroit:stroit_dev_password@localhost:5432/stroit_dev?schema=public';
+const fallbackJwtSecret = 'stroit-development-jwt-secret-change-before-production';
 
 function parseEnvFile(filePath: string): NodeJS.ProcessEnv {
   const values: NodeJS.ProcessEnv = {};
@@ -97,5 +99,6 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     environment: readEnvironment(runtimeEnv.ENVIRONMENT ?? runtimeEnv.NODE_ENV),
     port: readPort(runtimeEnv.BACKEND_PORT),
     databaseUrl: runtimeEnv.DATABASE_URL ?? fallbackDatabaseUrl,
+    jwtSecret: runtimeEnv.JWT_SECRET ?? fallbackJwtSecret,
   };
 }

@@ -20,4 +20,8 @@ export class AppConfigService {
   get databaseUrl(): string {
     return this.config.databaseUrl;
   }
+
+  get jwtSecret(): string {
+    return this.config.jwtSecret;
+  }
 }

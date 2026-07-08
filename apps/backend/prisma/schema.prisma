@@ -78,6 +78,15 @@ enum ProcessStatus {
   CANCELLED
 }
 
+enum Role {
+  CREATOR
+  DIRECTOR
+  FINANCE
+  FOREMAN
+  WORKER
+  PARTNER
+}
+
 model Event {
   id         String    @id @default(uuid())
   type       EventType
@@ -110,4 +119,19 @@ model Process {
   @@index([status])
   @@index([createdAt])
   @@map("processes")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  role         Role
+  name         String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([role])
+  @@index([isActive])
+  @@map("users")
 }
