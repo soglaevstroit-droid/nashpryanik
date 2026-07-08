@@ -146,6 +146,70 @@ Development services are running
 - дождитесь завершения startup healthcheck;
 - проверьте локальные порты и значения `.env`.
 
+## Проверка Database Foundation
+
+Этот блок подтверждает, что Prisma/PostgreSQL foundation работает против реально поднятого локального PostgreSQL.
+
+```bash
+make up
+make status
+npm run prisma:generate
+npm run prisma:migrate
+```
+
+Ожидаемый результат:
+
+- контейнер `stroit-postgres` находится в состоянии running или healthy;
+- Prisma Client успешно генерируется;
+- initial migration применяется без создания доменных таблиц;
+- в базе появляется только служебная история миграций Prisma.
+
+После применения migration запустите backend:
+
+```bash
+npm run start -w @stroit/backend
+```
+
+В отдельном терминале проверьте health endpoints:
+
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3000/health/ready
+```
+
+Ожидаемый результат для `/health`:
+
+```json
+{
+  "status": "ok",
+  "appName": "СТРОИТ.РФ",
+  "environment": "development",
+  "timestamp": "<ISO timestamp>"
+}
+```
+
+Ожидаемый результат для `/health/ready`:
+
+```json
+{
+  "status": "ok",
+  "appName": "СТРОИТ.РФ",
+  "environment": "development",
+  "timestamp": "<ISO timestamp>",
+  "database": {
+    "connected": true
+  }
+}
+```
+
+Если `/health/ready` возвращает `database.connected: false`:
+
+- убедитесь, что Docker Desktop запущен;
+- выполните `make status` и проверьте состояние `stroit-postgres`;
+- проверьте `DATABASE_URL` в `.env` или `.env.example`;
+- выполните `make logs` и проверьте логи PostgreSQL;
+- повторите `npm run prisma:migrate` после восстановления соединения с PostgreSQL.
+
 ## Сброс окружения
 
 ```bash
