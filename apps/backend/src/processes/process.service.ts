@@ -1,18 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ProcessStatus } from '@prisma/client';
 import { EventService } from '../events/event.service.js';
+import { EventType } from '../events/event-types.js';
 import { CreateProcessDto } from './dto/create-process.dto.js';
 import { ProcessRecord } from './process-record.js';
 import { ProcessRepository } from './process.repository.js';
 
 const defaultProcessListLimit = 100;
-
-type ProcessAction =
-  | 'PROCESS_CREATED'
-  | 'PROCESS_STARTED'
-  | 'PROCESS_PAUSED'
-  | 'PROCESS_COMPLETED'
-  | 'PROCESS_CANCELLED';
 
 @Injectable()
 export class ProcessService {
@@ -39,7 +33,10 @@ export class ProcessService {
       startedAt,
       finishedAt: undefined,
     });
-    await this.createProcessEvent(updated, 'PROCESS_STARTED');
+    await this.createProcessEvent(
+      updated,
+      process.status === 'PAUSED' ? 'PROCESS_RESUMED' : 'PROCESS_STARTED',
+    );
 
     return updated;
   }
@@ -119,13 +116,12 @@ export class ProcessService {
     }
   }
 
-  private async createProcessEvent(process: ProcessRecord, action: ProcessAction): Promise<void> {
+  private async createProcessEvent(process: ProcessRecord, type: EventType): Promise<void> {
     await this.events.createEvent({
-      type: 'SYSTEM_UPDATED',
+      type,
       entityType: 'process',
       entityId: process.id,
       payload: {
-        action,
         processType: process.type,
         processStatus: process.status,
       },

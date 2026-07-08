@@ -92,7 +92,7 @@ PATCH /api/v1/processes/:id/cancel
 }
 ```
 
-`Process` хранит только текущее состояние жизненного цикла. История процесса не хранится в `processes`; каждое изменение состояния создает запись в Event Engine с `entityType: "process"` и `entityId` процесса.
+`Process` хранит только текущее состояние жизненного цикла. История процесса не хранится в `processes`; каждое изменение состояния создает запись в Event Engine с явным `PROCESS_*` event type, `entityType: "process"` и `entityId` процесса.
 
 ## Health endpoint
 

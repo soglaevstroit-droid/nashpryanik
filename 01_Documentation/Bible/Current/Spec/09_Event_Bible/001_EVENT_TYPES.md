@@ -151,6 +151,17 @@
 
 ---
 
+# 016. Процесс
+
+- PROCESS_CREATED
+- PROCESS_STARTED
+- PROCESS_PAUSED
+- PROCESS_RESUMED
+- PROCESS_COMPLETED
+- PROCESS_CANCELLED
+
+---
+
 # Главное правило
 
 Любое новое действие в системе должно использовать существующий тип события.

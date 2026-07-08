@@ -53,6 +53,12 @@ export const eventTypes = [
   'SYSTEM_ERROR',
   'SYSTEM_WARNING',
   'SYSTEM_UPDATED',
+  'PROCESS_CREATED',
+  'PROCESS_STARTED',
+  'PROCESS_PAUSED',
+  'PROCESS_RESUMED',
+  'PROCESS_COMPLETED',
+  'PROCESS_CANCELLED',
 ] as const;
 
 export type EventType = (typeof eventTypes)[number];

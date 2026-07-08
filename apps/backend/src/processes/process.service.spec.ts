@@ -74,13 +74,13 @@ function createRepository(seed: ProcessRecord[] = []): ProcessRepository {
   return repository as ProcessRepository;
 }
 
-function createEventService(actions: string[]): EventService {
+function createEventService(eventTypes: string[]): EventService {
   return {
     createEvent: async (dto) => {
-      actions.push(readAction(dto.payload));
+      eventTypes.push(dto.type);
 
       return {
-        id: `event-${actions.length}`,
+        id: `event-${eventTypes.length}`,
         type: dto.type,
         actorId: null,
         entityType: dto.entityType ?? null,
@@ -93,17 +93,9 @@ function createEventService(actions: string[]): EventService {
   } as EventService;
 }
 
-function readAction(payload: unknown): string {
-  if (payload && typeof payload === 'object' && 'action' in payload) {
-    return String(payload.action);
-  }
-
-  return '';
-}
-
 test('creates process and corresponding event', async () => {
-  const actions: string[] = [];
-  const service = new ProcessService(createRepository(), createEventService(actions));
+  const eventTypes: string[] = [];
+  const service = new ProcessService(createRepository(), createEventService(eventTypes));
 
   const process = await service.createProcess({
     type: 'WORK_DAY',
@@ -111,48 +103,62 @@ test('creates process and corresponding event', async () => {
   });
 
   assert.equal(process.status, 'CREATED');
-  assert.deepEqual(actions, ['PROCESS_CREATED']);
+  assert.deepEqual(eventTypes, ['PROCESS_CREATED']);
 });
 
 test('starts process and creates event', async () => {
-  const actions: string[] = [];
+  const eventTypes: string[] = [];
   const service = new ProcessService(
     createRepository([createProcess({ id: 'process-1', status: 'CREATED' })]),
-    createEventService(actions),
+    createEventService(eventTypes),
   );
 
   const process = await service.startProcess('process-1');
 
   assert.equal(process.status, 'ACTIVE');
   assert.ok(process.startedAt);
-  assert.deepEqual(actions, ['PROCESS_STARTED']);
+  assert.deepEqual(eventTypes, ['PROCESS_STARTED']);
 });
 
 test('pauses process and creates event', async () => {
-  const actions: string[] = [];
+  const eventTypes: string[] = [];
   const service = new ProcessService(
     createRepository([createProcess({ id: 'process-1', status: 'ACTIVE', startedAt: createdAt })]),
-    createEventService(actions),
+    createEventService(eventTypes),
   );
 
   const process = await service.pauseProcess('process-1');
 
   assert.equal(process.status, 'PAUSED');
-  assert.deepEqual(actions, ['PROCESS_PAUSED']);
+  assert.deepEqual(eventTypes, ['PROCESS_PAUSED']);
 });
 
 test('completes process and creates event', async () => {
-  const actions: string[] = [];
+  const eventTypes: string[] = [];
   const service = new ProcessService(
     createRepository([createProcess({ id: 'process-1', status: 'ACTIVE', startedAt: createdAt })]),
-    createEventService(actions),
+    createEventService(eventTypes),
   );
 
   const process = await service.completeProcess('process-1');
 
   assert.equal(process.status, 'COMPLETED');
   assert.ok(process.finishedAt);
-  assert.deepEqual(actions, ['PROCESS_COMPLETED']);
+  assert.deepEqual(eventTypes, ['PROCESS_COMPLETED']);
+});
+
+test('cancels process and creates event', async () => {
+  const eventTypes: string[] = [];
+  const service = new ProcessService(
+    createRepository([createProcess({ id: 'process-1', status: 'ACTIVE', startedAt: createdAt })]),
+    createEventService(eventTypes),
+  );
+
+  const process = await service.cancelProcess('process-1');
+
+  assert.equal(process.status, 'CANCELLED');
+  assert.ok(process.finishedAt);
+  assert.deepEqual(eventTypes, ['PROCESS_CANCELLED']);
 });
 
 test('gets process by id', async () => {
