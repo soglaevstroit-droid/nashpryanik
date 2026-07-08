@@ -41,6 +41,7 @@ enum EventType {
   STEP_STARTED
   STEP_COMPLETED
   STEP_REOPENED
+  STEP_CANCELLED
   PHOTO_CAPTURED
   PHOTO_UPLOADED
   PHOTO_APPROVED
@@ -109,6 +110,14 @@ enum TaskPriority {
   NORMAL
   HIGH
   CRITICAL
+}
+
+enum TaskStepStatus {
+  CREATED
+  IN_PROGRESS
+  COMPLETED
+  REOPENED
+  CANCELLED
 }
 
 model Event {
@@ -197,4 +206,23 @@ model Task {
   @@index([processId])
   @@index([createdAt])
   @@map("tasks")
+}
+
+model TaskStep {
+  id          String         @id @default(uuid())
+  taskId      String
+  title       String
+  description String?
+  status      TaskStepStatus @default(CREATED)
+  order       Int
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([taskId])
+  @@index([status])
+  @@index([order])
+  @@index([createdAt])
+  @@map("task_steps")
 }

@@ -32,6 +32,7 @@ export const eventTypes = [
   'STEP_STARTED',
   'STEP_COMPLETED',
   'STEP_REOPENED',
+  'STEP_CANCELLED',
   'PHOTO_CAPTURED',
   'PHOTO_UPLOADED',
   'PHOTO_APPROVED',

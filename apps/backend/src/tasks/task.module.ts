@@ -14,5 +14,6 @@ import { TaskService } from './task.service.js';
   imports: [AppConfigModule, DatabaseModule, EventModule, ProcessModule],
   controllers: [TaskController],
   providers: [TaskRepository, TaskService, JwtService, JwtAuthGuard, RolesGuard],
+  exports: [TaskService],
 })
 export class TaskModule {}
