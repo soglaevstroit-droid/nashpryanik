@@ -7,7 +7,8 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "build": "nest build",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "npm run build && node --test \"dist/**/*.spec.js\""
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
