@@ -25,6 +25,7 @@
 - Authentication foundation;
 - RBAC foundation;
 - Work Shift foundation;
+- Task foundation;
 - `GET /health`;
 - `GET /health/ready`;
 - минимальный тест health controller.
@@ -157,6 +158,57 @@ GET /api/v1/work-shifts/history
 - начало и завершение смены создают события `WORK_SHIFT_STARTED` и `WORK_SHIFT_FINISHED`;
 - задачи, фото, геолокация, таймеры, начисления, монеты и AI здесь не реализованы.
 
+## Task Foundation API
+
+Task endpoints защищены JWT и RBAC:
+
+```http
+POST /api/v1/tasks
+GET /api/v1/tasks
+GET /api/v1/tasks/:id
+PATCH /api/v1/tasks/:id/assign
+PATCH /api/v1/tasks/:id/accept
+PATCH /api/v1/tasks/:id/start
+PATCH /api/v1/tasks/:id/review
+PATCH /api/v1/tasks/:id/complete
+PATCH /api/v1/tasks/:id/cancel
+```
+
+Доступ:
+
+- `CREATOR`, `DIRECTOR`, `FOREMAN` — создание, назначение, управление жизненным циклом и чтение;
+- `WORKER` — принятие, старт, отправка на ревью, завершение назначенной задачи и чтение карточки задачи;
+- `FINANCE` — только чтение списка и карточки задачи;
+- `PARTNER` — доступа к task endpoints нет.
+
+Минимальные статусы задачи:
+
+- `CREATED`
+- `ASSIGNED`
+- `ACCEPTED`
+- `IN_PROGRESS`
+- `ON_REVIEW`
+- `COMPLETED`
+- `CANCELLED`
+
+Минимальные приоритеты:
+
+- `LOW`
+- `NORMAL`
+- `HIGH`
+- `CRITICAL`
+
+Правила foundation:
+
+- задача создается вместе с Process `TASK`;
+- Task хранит только текущее состояние, исполнителя, автора, приоритет и ссылку на Process;
+- Task не хранит историю изменений;
+- каждое изменение задачи создает Event Engine запись с `entityType: "task"`;
+- отправка на ревью использует утвержденный event type `TASK_UPDATED` с `action: "TASK_SENT_TO_REVIEW"` в payload;
+- завершение задачи завершает связанный Process;
+- отмена задачи отменяет связанный Process;
+- этапы, фото, чек-листы, комментарии, монеты и AI здесь не реализованы.
+
 ## Health endpoint
 
 ```http
@@ -198,10 +250,10 @@ GET /health/ready
 
 Prisma schema находится в `apps/backend/prisma/schema.prisma`.
 
-Initial database migration создана без доменных таблиц. Event foundation migration создает таблицу `events` и enum `EventType` для памяти компании. Process foundation migration создает таблицу `processes` и enum `ProcessStatus` для текущего состояния процесса. Auth foundation migration создает `users` и enum `Role`. Work Shift foundation migration создает `work_shifts` и enum `WorkShiftStatus`. Эти migrations не создают `tasks`, `photos`, `coins` или AI-сущности.
+Initial database migration создана без доменных таблиц. Event foundation migration создает таблицу `events` и enum `EventType` для памяти компании. Process foundation migration создает таблицу `processes` и enum `ProcessStatus` для текущего состояния процесса. Auth foundation migration создает `users` и enum `Role`. Work Shift foundation migration создает `work_shifts` и enum `WorkShiftStatus`. Task foundation migration создает `tasks`, `TaskStatus` и `TaskPriority`. Эти migrations не создают `photos`, `coins` или AI-сущности.
 
 Prisma CLI использует корневой `.env`. Перед запуском `npm run prisma:generate`, `npm run prisma:migrate` или `npm run prisma:studio` из корня проекта должен существовать локальный `.env`, созданный из `.env.example`.
 
 ## Ограничения
 
-На текущем этапе не реализованы tasks, photos, coins или AI. Event module является техническим фундаментом памяти компании. Process module является техническим фундаментом жизненного цикла процесса. Work Shift module является первым бизнес-доменом и хранит только факт активной или завершенной смены.
+На текущем этапе не реализованы photos, coins или AI. Event module является техническим фундаментом памяти компании. Process module является техническим фундаментом жизненного цикла процесса. Work Shift module является первым бизнес-доменом и хранит только факт активной или завершенной смены. Task module является первым foundation для управляемой работы и хранит только текущее состояние задачи.

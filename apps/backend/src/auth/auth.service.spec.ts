@@ -7,6 +7,7 @@ import { AppConfigService } from '../config/app-config.service.js';
 import { EventService } from '../events/event.service.js';
 import { EventController } from '../events/event.controller.js';
 import { ProcessController } from '../processes/process.controller.js';
+import { TaskController } from '../tasks/task.controller.js';
 import { UserRecord } from '../users/user-record.js';
 import { UserService } from '../users/user.service.js';
 import { AuthRequest } from './auth-user.js';
@@ -236,6 +237,47 @@ test('process controller allows foreman and rejects worker', () => {
   assert.throws(
     () => guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
     /Forbidden/,
+  );
+});
+
+test('task controller allows foreman create and rejects partner', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = TaskController.prototype.createTask as () => unknown;
+  const controller = TaskController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('FOREMAN'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('PARTNER'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('task controller allows worker lifecycle and rejects finance write', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = TaskController.prototype.acceptTask as () => unknown;
+  const controller = TaskController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('task controller allows finance read', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = TaskController.prototype.listTasks as () => unknown;
+  const controller = TaskController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
+    true,
   );
 });
 

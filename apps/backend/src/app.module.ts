@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module.js';
 import { LoggerModule } from './logger/logger.module.js';
 import { ProcessModule } from './processes/process.module.js';
 import { RolesModule } from './roles/roles.module.js';
+import { TaskModule } from './tasks/task.module.js';
 import { UserModule } from './users/user.module.js';
 import { WorkShiftModule } from './work-shifts/work-shift.module.js';
 
@@ -24,6 +25,7 @@ import { WorkShiftModule } from './work-shifts/work-shift.module.js';
     RolesModule,
     AuthModule,
     WorkShiftModule,
+    TaskModule,
   ],
 })
 export class AppModule {}
