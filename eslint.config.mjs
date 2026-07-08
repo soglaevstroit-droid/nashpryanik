@@ -3,7 +3,15 @@ import tseslint from 'typescript-eslint';
 
 export default [
   {
-    ignores: ['node_modules/**', 'dist/**', 'build/**', 'coverage/**', '.dart_tool/**'],
+    ignores: [
+      'node_modules/**',
+      'dist/**',
+      '**/dist/**',
+      'build/**',
+      '**/build/**',
+      'coverage/**',
+      '.dart_tool/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

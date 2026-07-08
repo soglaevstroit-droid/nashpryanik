@@ -1,6 +1,7 @@
+import { AppConfigService } from '../config/app-config.service.js';
 import { DatabaseService } from './database.service.js';
 
-const database = new DatabaseService();
+const database = new DatabaseService(new AppConfigService());
 const ready = await database.checkConnection();
 
 await database.$disconnect();
