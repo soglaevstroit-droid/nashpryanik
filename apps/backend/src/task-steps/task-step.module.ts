@@ -14,5 +14,6 @@ import { TaskStepService } from './task-step.service.js';
   imports: [AppConfigModule, DatabaseModule, EventModule, TaskModule],
   controllers: [TaskStepController],
   providers: [TaskStepRepository, TaskStepService, JwtService, JwtAuthGuard, RolesGuard],
+  exports: [TaskStepService],
 })
 export class TaskStepModule {}

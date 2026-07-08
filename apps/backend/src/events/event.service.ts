@@ -35,6 +35,14 @@ export class EventService {
     return this.repository.findMany(defaultEventListLimit);
   }
 
+  async listEventsByActorId(actorId: string, limit: number): Promise<EventRecord[]> {
+    if (!actorId) {
+      throw new BadRequestException('Actor id is required');
+    }
+
+    return this.repository.findManyByActorId(actorId, limit);
+  }
+
   private assertCreateEventDto(dto: CreateEventDto): void {
     if (!dto || typeof dto !== 'object') {
       throw new BadRequestException('Event body is required');

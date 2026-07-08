@@ -45,6 +45,20 @@ export class EventRepository {
     return events.map((event) => this.toRecord(event));
   }
 
+  async findManyByActorId(actorId: string, limit: number): Promise<EventRecord[]> {
+    const events = await this.database.event.findMany({
+      where: {
+        actorId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: limit,
+    });
+
+    return events.map((event) => this.toRecord(event));
+  }
+
   private toRecord(event: Event): EventRecord {
     return {
       id: event.id,

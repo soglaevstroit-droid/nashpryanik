@@ -3,6 +3,7 @@ const state = {
   user: readJson('stroit.demo.user'),
   currentTask: null,
   shift: null,
+  workspace: null,
 };
 
 const elements = {
@@ -16,6 +17,10 @@ const elements = {
   shiftStatus: document.querySelector('#shiftStatus'),
   startShiftButton: document.querySelector('#startShiftButton'),
   finishShiftButton: document.querySelector('#finishShiftButton'),
+  todayShift: document.querySelector('#todayShift'),
+  todayTasks: document.querySelector('#todayTasks'),
+  todaySteps: document.querySelector('#todaySteps'),
+  todayLastAction: document.querySelector('#todayLastAction'),
   refreshAllButton: document.querySelector('#refreshAllButton'),
   loadTasksButton: document.querySelector('#loadTasksButton'),
   createDemoTaskButton: document.querySelector('#createDemoTaskButton'),
@@ -46,7 +51,7 @@ elements.reloadTaskButton.addEventListener('click', () => {
     openTask(state.currentTask.id);
   }
 });
-elements.loadEventsButton.addEventListener('click', loadEvents);
+elements.loadEventsButton.addEventListener('click', refreshWorkspace);
 
 renderAuthState();
 
@@ -78,6 +83,7 @@ function logout() {
   state.user = null;
   state.currentTask = null;
   state.shift = null;
+  state.workspace = null;
   localStorage.removeItem('stroit.demo.token');
   localStorage.removeItem('stroit.demo.user');
   renderAuthState();
@@ -93,6 +99,16 @@ function getTaskListPath() {
 
 async function refreshWorkspace() {
   if (!state.token) {
+    return;
+  }
+
+  if (!state.user) {
+    await loadMe();
+  }
+
+  if (state.user?.role === 'WORKER') {
+    const workspace = await api('/workspace');
+    renderWorkspace(workspace);
     return;
   }
 
@@ -113,8 +129,7 @@ async function loadShift() {
 async function mutateShift(path) {
   try {
     await api(path, { method: 'POST' });
-    await loadShift();
-    await loadEvents();
+    await refreshWorkspace();
     showMessage('Статус смены обновлён.');
   } catch (error) {
     showError(error);
@@ -122,6 +137,11 @@ async function mutateShift(path) {
 }
 
 async function loadTasks() {
+  if (state.user?.role === 'WORKER') {
+    await refreshWorkspace();
+    return;
+  }
+
   try {
     const tasks = await api(getTaskListPath());
     renderTasks(tasks);
@@ -152,15 +172,28 @@ async function createDemoTask() {
     });
 
     showMessage('Демо-задача и этап созданы.');
-    await loadTasks();
+    await refreshWorkspace();
     await openTask(task.id);
-    await loadEvents();
   } catch (error) {
     showError(error);
   }
 }
 
 async function openTask(taskId) {
+  if (state.workspace) {
+    const task = state.workspace.myTasks.find((item) => item.id === taskId);
+
+    if (!task) {
+      showError(new Error('Задача не найдена в рабочем месте.'));
+      return;
+    }
+
+    state.currentTask = task;
+    renderTask(task);
+    renderSteps(task.id === state.workspace.currentTask?.id ? state.workspace.currentSteps : []);
+    return;
+  }
+
   try {
     const task = await api(`/tasks/${taskId}`);
     state.currentTask = task;
@@ -184,8 +217,7 @@ async function loadSteps(taskId) {
 async function startStep(stepId) {
   try {
     await api(`/task-steps/${stepId}/start`, { method: 'PATCH' });
-    await openTask(state.currentTask.id);
-    await loadEvents();
+    await refreshWorkspace();
     showMessage('Этап начат.');
   } catch (error) {
     showError(error);
@@ -195,8 +227,7 @@ async function startStep(stepId) {
 async function completeStep(stepId) {
   try {
     await api(`/task-steps/${stepId}/complete`, { method: 'PATCH' });
-    await openTask(state.currentTask.id);
-    await loadEvents();
+    await refreshWorkspace();
     showMessage('Этап завершён. Можно загрузить фото.');
   } catch (error) {
     showError(error);
@@ -222,7 +253,7 @@ async function uploadPhoto(stepId, input) {
       formData,
     });
     input.value = '';
-    await loadEvents();
+    await refreshWorkspace();
     showMessage('Фото успешно загружено.');
   } catch (error) {
     showError(error);
@@ -230,6 +261,11 @@ async function uploadPhoto(stepId, input) {
 }
 
 async function loadEvents() {
+  if (state.user?.role === 'WORKER') {
+    await refreshWorkspace();
+    return;
+  }
+
   try {
     const events = await api('/events');
     renderEvents(events);
@@ -237,6 +273,28 @@ async function loadEvents() {
     renderEmpty(elements.eventsList, 'История событий недоступна для текущей роли.');
     showError(error);
   }
+}
+
+function renderWorkspace(workspace) {
+  state.workspace = workspace;
+  state.user = workspace.user;
+  state.shift = workspace.currentShift;
+  state.currentTask = workspace.currentTask;
+  localStorage.setItem('stroit.demo.user', JSON.stringify(state.user));
+  renderAuthState();
+  renderShift();
+  renderToday(workspace.today);
+  renderTasks(workspace.myTasks);
+
+  if (workspace.currentTask) {
+    renderTask(workspace.currentTask);
+    renderSteps(workspace.currentSteps);
+  } else {
+    elements.taskScreen.hidden = true;
+    renderEmpty(elements.stepsList, 'Текущей задачи нет.');
+  }
+
+  renderEvents(workspace.myEvents);
 }
 
 async function api(path, options = {}) {
@@ -283,6 +341,15 @@ function renderAuthState() {
 
 function renderShift() {
   elements.shiftStatus.textContent = state.shift ? state.shift.status : 'Смена не начата';
+}
+
+function renderToday(today) {
+  elements.todayShift.textContent = today.shiftStatus === 'ACTIVE' ? 'Активна' : today.shiftStatus;
+  elements.todayTasks.textContent = String(today.tasksCount);
+  elements.todaySteps.textContent = `${today.activeStepsCount} активных`;
+  elements.todayLastAction.textContent = today.lastAction
+    ? `${formatEventType(today.lastAction.type)} · ${formatRelativeTime(today.lastAction.createdAt)}`
+    : 'Нет событий';
 }
 
 function renderTasks(tasks) {
@@ -368,8 +435,8 @@ function renderEvents(events) {
     const item = document.createElement('article');
     item.className = 'item';
     item.innerHTML = `
-      <div class="itemTitle">${escapeHtml(event.type)}</div>
-      <div class="itemMeta">${escapeHtml(event.createdAt)} · ${escapeHtml(event.entityType ?? 'no-entity')} · ${escapeHtml(event.entityId ?? 'no-id')}</div>
+      <div class="itemTitle">${escapeHtml(formatEventType(event.type))}</div>
+      <div class="itemMeta">${escapeHtml(formatEventTime(event.createdAt))} · ${escapeHtml(event.entityType ?? 'no-entity')} · ${escapeHtml(event.entityId ?? 'no-id')}</div>
     `;
     elements.eventsList.append(item);
   }
@@ -403,6 +470,47 @@ function readJson(key) {
   } catch {
     return null;
   }
+}
+
+function formatEventType(type) {
+  const labels = {
+    WORK_SHIFT_STARTED: 'Начал смену',
+    WORK_SHIFT_FINISHED: 'Завершил смену',
+    TASK_ASSIGNED: 'Получил задачу',
+    TASK_ACCEPTED: 'Принял задачу',
+    TASK_STARTED: 'Начал задачу',
+    TASK_SENT_TO_REVIEW: 'Отправил задачу на ревью',
+    TASK_COMPLETED: 'Завершил задачу',
+    STEP_STARTED: 'Начал этап',
+    STEP_COMPLETED: 'Завершил этап',
+    STEP_REOPENED: 'Переоткрыл этап',
+    STEP_CANCELLED: 'Отменил этап',
+    PHOTO_UPLOADED: 'Загрузил фото',
+  };
+
+  return labels[type] ?? type;
+}
+
+function formatEventTime(value) {
+  return new Date(value).toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatRelativeTime(value) {
+  const diffMs = Date.now() - new Date(value).getTime();
+  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+
+  if (diffMinutes < 1) {
+    return 'только что';
+  }
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes} мин назад`;
+  }
+
+  return formatEventTime(value);
 }
 
 function escapeHtml(value) {

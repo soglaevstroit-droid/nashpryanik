@@ -27,7 +27,10 @@ function createEvent(overrides: Partial<EventRecord> = {}): EventRecord {
 function createRepository(seed: EventRecord[] = []): EventRepository {
   const events = [...seed];
 
-  const repository: Pick<EventRepository, 'create' | 'findMany' | 'findById'> = {
+  const repository: Pick<
+    EventRepository,
+    'create' | 'findMany' | 'findManyByActorId' | 'findById'
+  > = {
     create: async (dto: CreateEventDto) => {
       const event = createEvent({
         id: `event-${events.length + 1}`,
@@ -44,6 +47,8 @@ function createRepository(seed: EventRecord[] = []): EventRepository {
       return event;
     },
     findMany: async () => events,
+    findManyByActorId: async (actorId: string) =>
+      events.filter((event) => event.actorId === actorId),
     findById: async (id: string) => events.find((event) => event.id === id) ?? null,
   };
 
@@ -83,6 +88,23 @@ test('gets event by id', async () => {
   const event = await service.getEventById('event-42');
 
   assert.equal(event.id, 'event-42');
+});
+
+test('lists events by actor id', async () => {
+  const service = new EventService(
+    createRepository([
+      createEvent({ id: 'event-1', actorId: 'worker-1' }),
+      createEvent({ id: 'event-2', actorId: 'worker-2' }),
+      createEvent({ id: 'event-3', actorId: 'worker-1' }),
+    ]),
+  );
+
+  const events = await service.listEventsByActorId('worker-1', 20);
+
+  assert.deepEqual(
+    events.map((event) => event.id),
+    ['event-1', 'event-3'],
+  );
 });
 
 test('rejects unknown event type', async () => {

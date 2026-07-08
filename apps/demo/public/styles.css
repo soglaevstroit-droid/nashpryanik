@@ -122,7 +122,8 @@ input {
   font-weight: 600;
 }
 
-.statusGrid {
+.statusGrid,
+.todayGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
@@ -130,6 +131,7 @@ input {
 }
 
 .statusGrid > div,
+.todayGrid > div,
 .item {
   border: 1px solid #e2e8f0;
   border-radius: 6px;

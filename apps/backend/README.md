@@ -160,6 +160,26 @@ GET /api/v1/work-shifts/history
 - начало и завершение смены создают события `WORK_SHIFT_STARTED` и `WORK_SHIFT_FINISHED`;
 - задачи, фото, геолокация, таймеры, начисления, монеты и AI здесь не реализованы.
 
+## Worker Workspace API
+
+Worker workspace endpoint защищен JWT и доступен только роли `WORKER`:
+
+```http
+GET /api/v1/workspace
+```
+
+Ответ агрегирует существующие данные без создания новых записей:
+
+- current user;
+- current active shift;
+- my tasks;
+- current task;
+- current steps;
+- последние 20 собственных событий по `actorId`;
+- краткую карточку `today`.
+
+`FINANCE`, `PARTNER` и менеджерские роли не получают доступ к worker workspace, чтобы endpoint не становился dashboard или административной поверхностью.
+
 ## Task Foundation API
 
 Task endpoints защищены JWT и RBAC:

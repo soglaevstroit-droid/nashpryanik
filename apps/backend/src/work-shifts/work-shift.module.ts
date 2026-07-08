@@ -13,5 +13,6 @@ import { WorkShiftService } from './work-shift.service.js';
   imports: [AppConfigModule, DatabaseModule, EventModule, ProcessModule],
   controllers: [WorkShiftController],
   providers: [WorkShiftRepository, WorkShiftService, JwtService, JwtAuthGuard],
+  exports: [WorkShiftService],
 })
 export class WorkShiftModule {}

@@ -12,6 +12,7 @@ import { TaskStepController } from '../task-steps/task-step.controller.js';
 import { TaskController } from '../tasks/task.controller.js';
 import { UserRecord } from '../users/user-record.js';
 import { UserService } from '../users/user.service.js';
+import { WorkspaceController } from '../workspace/workspace.controller.js';
 import { AuthRequest } from './auth-user.js';
 import { AuthService } from './auth.service.js';
 import { Roles } from './decorators/roles.decorator.js';
@@ -366,6 +367,25 @@ test('artifact controller allows finance read and rejects partner read', () => {
   assert.equal(
     guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
     true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('PARTNER'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('workspace controller allows worker and rejects finance or partner', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = WorkspaceController.prototype.getWorkspace as () => unknown;
+  const controller = WorkspaceController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
+    /Forbidden/,
   );
   assert.throws(
     () => guard.canActivate(createHttpContext(createRequest('PARTNER'), handler, controller)),

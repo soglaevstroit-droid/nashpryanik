@@ -12,6 +12,7 @@ import { RolesModule } from './roles/roles.module.js';
 import { TaskStepModule } from './task-steps/task-step.module.js';
 import { TaskModule } from './tasks/task.module.js';
 import { UserModule } from './users/user.module.js';
+import { WorkspaceModule } from './workspace/workspace.module.js';
 import { WorkShiftModule } from './work-shifts/work-shift.module.js';
 
 @Module({
@@ -30,6 +31,7 @@ import { WorkShiftModule } from './work-shifts/work-shift.module.js';
     TaskModule,
     TaskStepModule,
     ArtifactModule,
+    WorkspaceModule,
   ],
 })
 export class AppModule {}
