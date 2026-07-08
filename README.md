@@ -4,15 +4,29 @@
 
 Этот репозиторий подготовлен для разработки без прикладного кода приложения. На текущем этапе поднимаются только инфраструктурные сервисы: PostgreSQL, Redis и MinIO.
 
+## Prerequisites
+
+Для локальной разработки обязательны:
+
+- Node.js 22 или выше;
+- npm;
+- Make;
+- Docker Desktop с запущенным Docker Engine.
+
+Docker Desktop обязателен для `make up`, PostgreSQL, Redis, MinIO, healthcheck инфраструктуры и проверки Prisma migration против локальной базы данных.
+
 ## Local Development
 
 ### Подготовка
 
 ```bash
 npm ci
+cp .env.example .env
 ```
 
-Команда устанавливает tooling из `package-lock.json`. Backend-зависимости NestJS зафиксированы через npm workspace `apps/backend`.
+Первая команда устанавливает tooling из `package-lock.json`. Backend-зависимости NestJS зафиксированы через npm workspace `apps/backend`.
+
+Вторая команда создает единый локальный `.env`. Этот файл используется Docker Compose, backend runtime и Prisma CLI. `.env` не коммитится в git.
 
 ### Быстрый старт
 
@@ -20,7 +34,7 @@ npm ci
 make up
 ```
 
-Команда использует `.env`, если файл существует. Если `.env` еще не создан, используются безопасные значения из `.env.example`.
+Команда использует значения из локального `.env`.
 
 ### Остановить сервисы
 

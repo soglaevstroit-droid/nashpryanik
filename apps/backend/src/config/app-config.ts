@@ -62,13 +62,9 @@ function findEnvFile(fileName: string, startDirectory: string = process.cwd()): 
 }
 
 function loadFileEnvironment(): NodeJS.ProcessEnv {
-  const exampleEnvFile = findEnvFile('.env.example');
   const localEnvFile = findEnvFile('.env');
 
-  return {
-    ...(exampleEnvFile ? parseEnvFile(exampleEnvFile) : {}),
-    ...(localEnvFile ? parseEnvFile(localEnvFile) : {}),
-  };
+  return localEnvFile ? parseEnvFile(localEnvFile) : {};
 }
 
 function readEnvironment(value: string | undefined): AppEnvironment {

@@ -80,6 +80,8 @@ Prisma schema находится в `apps/backend/prisma/schema.prisma`.
 
 Initial migration создана без доменных таблиц. Она фиксирует migration foundation, но не создает `users`, `tasks`, `photos`, `coins`, `events` или другие бизнес-сущности.
 
+Prisma CLI использует корневой `.env`. Перед запуском `npm run prisma:generate`, `npm run prisma:migrate` или `npm run prisma:studio` из корня проекта должен существовать локальный `.env`, созданный из `.env.example`.
+
 ## Ограничения
 
 На текущем этапе не реализованы бизнес-модули, доменные сущности, auth, users, tasks, events, photos, coins или AI.
