@@ -90,11 +90,21 @@ npm run format:check
 
 Если Docker недоступен в текущем окружении, используйте `LOCAL_VERIFICATION_CHECKLIST.md` на машине разработчика с установленным Docker Desktop.
 
+### Demo Panel
+
+```bash
+npm run backend:dev
+npm run demo:dev
+```
+
+Demo panel открывается по адресу `http://localhost:3100` и проксирует `/api/*` на backend `http://localhost:3000`.
+
 ## Структура проекта
 
 ```text
 apps/
   backend/    NestJS/TypeScript backend skeleton без бизнес-логики
+  demo/       первый рабочий browser demo panel
   mobile/     Flutter mobile skeleton без экранов и логики
   admin/      зарезервированное место без admin role и admin UI
 

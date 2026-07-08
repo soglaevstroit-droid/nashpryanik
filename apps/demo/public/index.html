@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>СТРОИТ.РФ Demo Panel</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>СТРОИТ.РФ</h1>
+          <p>Первый рабочий demo panel</p>
+        </div>
+        <button id="logoutButton" class="ghost" type="button" hidden>Выйти</button>
+      </header>
+
+      <section id="loginScreen" class="panel narrow">
+        <h2>Авторизация</h2>
+        <form id="loginForm" class="form">
+          <label>
+            Логин
+            <input id="emailInput" type="email" autocomplete="username" required />
+          </label>
+          <label>
+            Пароль
+            <input id="passwordInput" type="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit">Войти</button>
+        </form>
+      </section>
+
+      <section id="workspaceScreen" class="workspace" hidden>
+        <section class="panel">
+          <div class="sectionHeader">
+            <div>
+              <h2>Рабочее место монтажника</h2>
+              <p id="userInfo">Пользователь не загружен</p>
+            </div>
+            <button id="refreshAllButton" type="button">Обновить</button>
+          </div>
+
+          <div class="statusGrid">
+            <div>
+              <span class="label">Смена</span>
+              <strong id="shiftStatus">Не загружена</strong>
+            </div>
+            <div>
+              <span class="label">Backend</span>
+              <strong id="backendStatus">/api/v1</strong>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="startShiftButton" type="button">Начать смену</button>
+            <button id="finishShiftButton" type="button">Завершить смену</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="sectionHeader">
+            <div>
+              <h2>Мои задачи</h2>
+              <p>Список берётся из существующего API задач.</p>
+            </div>
+            <div class="toolbar">
+              <button id="loadTasksButton" type="button">Получить список</button>
+              <button id="createDemoTaskButton" type="button">Создать демо-задачу</button>
+            </div>
+          </div>
+          <div id="tasksList" class="list empty">Задачи ещё не загружены.</div>
+        </section>
+
+        <section id="taskScreen" class="panel" hidden>
+          <div class="sectionHeader">
+            <div>
+              <h2 id="taskTitle">Задача</h2>
+              <p id="taskMeta">Статус не загружен</p>
+            </div>
+            <button id="reloadTaskButton" type="button">Обновить задачу</button>
+          </div>
+          <p id="taskDescription" class="description"></p>
+
+          <div class="sectionHeader compact">
+            <div>
+              <h3>Этапы</h3>
+              <p>Начало и завершение используют существующий Task Step API.</p>
+            </div>
+          </div>
+          <div id="stepsList" class="list empty">Этапы ещё не загружены.</div>
+        </section>
+
+        <section class="panel">
+          <div class="sectionHeader">
+            <div>
+              <h2>История событий</h2>
+              <p>Простой список Event без фильтров.</p>
+            </div>
+            <button id="loadEventsButton" type="button">Обновить историю</button>
+          </div>
+          <div id="eventsList" class="list empty">События ещё не загружены.</div>
+        </section>
+      </section>
+
+      <section id="messagePanel" class="message" hidden></section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

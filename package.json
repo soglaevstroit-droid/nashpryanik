@@ -16,6 +16,7 @@
     "backend:lint": "npm run lint -w @stroit/backend",
     "backend:test": "npm run test -w @stroit/backend",
     "backend:db:check": "npm run db:check -w @stroit/backend",
+    "demo:dev": "node apps/demo/server.mjs",
     "prisma:generate": "node --env-file=.env apps/backend/node_modules/prisma/build/index.js generate --schema apps/backend/prisma/schema.prisma",
     "prisma:migrate": "node --env-file=.env apps/backend/node_modules/prisma/build/index.js migrate dev --schema apps/backend/prisma/schema.prisma",
     "prisma:studio": "node --env-file=.env apps/backend/node_modules/prisma/build/index.js studio --schema apps/backend/prisma/schema.prisma",

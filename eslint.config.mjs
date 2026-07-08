@@ -36,4 +36,27 @@ export default [
       },
     },
   },
+  {
+    files: ['apps/demo/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        URL: 'readonly',
+      },
+    },
+  },
+  {
+    files: ['apps/demo/public/**/*.js'],
+    languageOptions: {
+      globals: {
+        document: 'readonly',
+        event: 'readonly',
+        fetch: 'readonly',
+        FormData: 'readonly',
+        localStorage: 'readonly',
+        window: 'readonly',
+      },
+    },
+  },
 ];
