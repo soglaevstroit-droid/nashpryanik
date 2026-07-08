@@ -9,12 +9,16 @@
   "scripts": {
     "format:check": "prettier --check \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \".github/**/*.yml\" \"apps/**/*.{json,md,ts,yaml}\" \"packages/**/*.md\" \"infra/**/*.{md,yml}\" \"scripts/**/*.{mjs,md}\" \"docs/**/*.md\" \"*.{json,mjs}\" \".*.jsonc\"",
     "lint": "eslint .",
-    "lint:md": "markdownlint-cli2 \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \"apps/**/*.md\" \"packages/**/*.md\" \"infra/**/*.md\" \"scripts/**/*.md\" \"docs/**/*.md\"",
+    "lint:md": "markdownlint-cli2 \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \"apps/**/*.md\" \"packages/**/*.md\" \"infra/**/*.md\" \"scripts/**/*.md\" \"docs/**/*.md\" \"!**/node_modules/**\"",
     "lint:yaml": "node scripts/validate-yaml.mjs",
     "backend:dev": "npm run start:dev -w @stroit/backend",
     "backend:build": "npm run build -w @stroit/backend",
     "backend:lint": "npm run lint -w @stroit/backend",
     "backend:test": "npm run test -w @stroit/backend",
+    "backend:db:check": "npm run db:check -w @stroit/backend",
+    "prisma:generate": "npm run prisma:generate -w @stroit/backend",
+    "prisma:migrate": "npm run prisma:migrate -w @stroit/backend",
+    "prisma:studio": "npm run prisma:studio -w @stroit/backend",
     "test": "npm run backend:test"
   },
   "devDependencies": {

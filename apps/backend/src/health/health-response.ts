@@ -4,3 +4,9 @@ export interface HealthResponse {
   environment: string;
   timestamp: string;
 }
+
+export interface ReadinessResponse extends HealthResponse {
+  database: {
+    connected: boolean;
+  };
+}

@@ -1,0 +1,2 @@
+-- Database foundation migration.
+-- Intentionally empty: domain tables and business models are introduced in later missions.

@@ -19,7 +19,9 @@
 - config foundation;
 - logger foundation;
 - global error foundation;
+- Prisma/PostgreSQL database foundation;
 - `GET /health`;
+- `GET /health/ready`;
 - минимальный тест health controller.
 
 ## Команды
@@ -29,6 +31,10 @@ npm run backend:dev
 npm run backend:build
 npm run backend:lint
 npm run backend:test
+npm run prisma:generate
+npm run prisma:migrate
+npm run prisma:studio
+npm run backend:db:check
 ```
 
 ## Health endpoint
@@ -48,6 +54,32 @@ GET /health
 }
 ```
 
+## Readiness endpoint
+
+```http
+GET /health/ready
+```
+
+Ответ:
+
+```json
+{
+  "status": "ok",
+  "appName": "СТРОИТ.РФ",
+  "environment": "development",
+  "timestamp": "2026-07-08T00:00:00.000Z",
+  "database": {
+    "connected": true
+  }
+}
+```
+
+## Prisma
+
+Prisma schema находится в `apps/backend/prisma/schema.prisma`.
+
+Initial migration создана без доменных таблиц. Она фиксирует migration foundation, но не создает `users`, `tasks`, `photos`, `coins`, `events` или другие бизнес-сущности.
+
 ## Ограничения
 
-На текущем этапе не реализованы бизнес-модули, доменные сущности, Prisma, PostgreSQL-подключение, auth, users, tasks, events, photos, coins или AI.
+На текущем этапе не реализованы бизнес-модули, доменные сущности, auth, users, tasks, events, photos, coins или AI.

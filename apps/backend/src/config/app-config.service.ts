@@ -16,4 +16,8 @@ export class AppConfigService {
   get port(): number {
     return this.config.port;
   }
+
+  get databaseUrl(): string {
+    return this.config.databaseUrl;
+  }
 }

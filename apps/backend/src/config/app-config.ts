@@ -4,6 +4,7 @@ export interface AppConfig {
   appName: string;
   environment: AppEnvironment;
   port: number;
+  databaseUrl: string;
 }
 
 const allowedEnvironments = new Set<AppEnvironment>(['development', 'test', 'production']);
@@ -31,5 +32,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     appName: env.APP_NAME ?? 'СТРОИТ.РФ',
     environment: readEnvironment(env.ENVIRONMENT ?? env.NODE_ENV),
     port: readPort(env.BACKEND_PORT),
+    databaseUrl:
+      env.DATABASE_URL ??
+      'postgresql://stroit:stroit_dev_password@localhost:5432/stroit_dev?schema=public',
   };
 }
