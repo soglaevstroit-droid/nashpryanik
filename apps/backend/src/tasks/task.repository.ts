@@ -40,6 +40,14 @@ export class TaskRepository {
     });
   }
 
+  findManyByAssigneeId(assigneeId: string, limit: number): Promise<TaskRecord[]> {
+    return this.prisma.task.findMany({
+      where: { assigneeId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+  }
+
   update(id: string, data: UpdateTaskData): Promise<TaskRecord> {
     return this.prisma.task.update({
       where: { id },

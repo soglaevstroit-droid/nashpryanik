@@ -167,6 +167,7 @@ Task endpoints защищены JWT и RBAC:
 ```http
 POST /api/v1/tasks
 GET /api/v1/tasks
+GET /api/v1/tasks/my
 GET /api/v1/tasks/:id
 PATCH /api/v1/tasks/:id/assign
 PATCH /api/v1/tasks/:id/accept
@@ -179,7 +180,7 @@ PATCH /api/v1/tasks/:id/cancel
 Доступ:
 
 - `CREATOR`, `DIRECTOR`, `FOREMAN` — создание, назначение, управление жизненным циклом и чтение;
-- `WORKER` — принятие, старт, отправка на ревью, завершение назначенной задачи и чтение карточки задачи;
+- `WORKER` — список своих задач через `GET /api/v1/tasks/my`, принятие, старт, отправка на ревью, завершение назначенной задачи и чтение карточки задачи;
 - `FINANCE` — только чтение списка и карточки задачи;
 - `PARTNER` — доступа к task endpoints нет.
 

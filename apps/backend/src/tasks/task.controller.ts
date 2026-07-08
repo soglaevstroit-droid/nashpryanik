@@ -30,6 +30,12 @@ export class TaskController {
     return this.tasks.listTasks();
   }
 
+  @Get('my')
+  @Roles('WORKER')
+  listMyTasks(@CurrentUser() user: AuthUser): Promise<TaskRecord[]> {
+    return this.tasks.listMyTasks(user);
+  }
+
   @Get(':id')
   @Roles(...readTaskRoles)
   getTask(@Param('id') id: string): Promise<TaskRecord> {

@@ -83,6 +83,14 @@ function logout() {
   renderAuthState();
 }
 
+function canManageTasks() {
+  return ['CREATOR', 'DIRECTOR', 'FOREMAN'].includes(state.user?.role);
+}
+
+function getTaskListPath() {
+  return state.user?.role === 'WORKER' ? '/tasks/my' : '/tasks';
+}
+
 async function refreshWorkspace() {
   if (!state.token) {
     return;
@@ -115,7 +123,7 @@ async function mutateShift(path) {
 
 async function loadTasks() {
   try {
-    const tasks = await api('/tasks');
+    const tasks = await api(getTaskListPath());
     renderTasks(tasks);
   } catch (error) {
     renderEmpty(elements.tasksList, 'Список задач недоступен для текущей роли.');
@@ -269,6 +277,8 @@ function renderAuthState() {
   if (state.user) {
     elements.userInfo.textContent = `${state.user.name ?? state.user.email} · ${state.user.role}`;
   }
+
+  elements.createDemoTaskButton.hidden = !canManageTasks();
 }
 
 function renderShift() {

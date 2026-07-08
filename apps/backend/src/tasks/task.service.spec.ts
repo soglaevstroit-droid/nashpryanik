@@ -41,7 +41,10 @@ function createTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
 function createRepository(seed: TaskRecord[] = []): TaskRepository {
   const tasks = [...seed];
 
-  const repository: Pick<TaskRepository, 'create' | 'findById' | 'findMany' | 'update'> = {
+  const repository: Pick<
+    TaskRepository,
+    'create' | 'findById' | 'findMany' | 'findManyByAssigneeId' | 'update'
+  > = {
     create: async (data) => {
       const task = createTask({
         id: `task-${tasks.length + 1}`,
@@ -58,6 +61,8 @@ function createRepository(seed: TaskRecord[] = []): TaskRepository {
     },
     findById: async (id: string) => tasks.find((task) => task.id === id) ?? null,
     findMany: async () => tasks,
+    findManyByAssigneeId: async (assigneeId: string) =>
+      tasks.filter((task) => task.assigneeId === assigneeId),
     update: async (id: string, data) => {
       const index = tasks.findIndex((task) => task.id === id);
       const current = tasks[index];
@@ -291,6 +296,25 @@ test('lists tasks', async () => {
   const tasks = await service.listTasks();
 
   assert.equal(tasks.length, 2);
+});
+
+test('lists only current worker tasks', async () => {
+  const service = new TaskService(
+    createRepository([
+      createTask({ id: 'task-1', assigneeId: worker.id }),
+      createTask({ id: 'task-2', assigneeId: 'worker-2' }),
+      createTask({ id: 'task-3', assigneeId: worker.id }),
+    ]),
+    createEventService([]),
+    createProcessService([]),
+  );
+
+  const tasks = await service.listMyTasks(worker);
+
+  assert.deepEqual(
+    tasks.map((task) => task.id),
+    ['task-1', 'task-3'],
+  );
 });
 
 test('rejects unknown transition', async () => {

@@ -140,6 +140,12 @@ export class TaskService {
     return this.repository.findMany(defaultTaskListLimit);
   }
 
+  listMyTasks(user: AuthUser): Promise<TaskRecord[]> {
+    assertAuthUser(user);
+
+    return this.repository.findManyByAssigneeId(user.id, defaultTaskListLimit);
+  }
+
   private async prepareWorkerTransition(
     user: AuthUser,
     id: string,

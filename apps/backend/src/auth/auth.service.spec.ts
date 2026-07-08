@@ -283,6 +283,25 @@ test('task controller allows finance read', () => {
   );
 });
 
+test('task my endpoint allows worker and rejects finance or partner', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = TaskController.prototype.listMyTasks as () => unknown;
+  const controller = TaskController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
+    /Forbidden/,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('PARTNER'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
 test('task step controller allows foreman create and rejects partner', () => {
   const guard = new RolesGuard(new Reflector());
   const handler = TaskStepController.prototype.createStep as () => unknown;
