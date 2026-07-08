@@ -21,6 +21,7 @@
 - global error foundation;
 - Prisma/PostgreSQL database foundation;
 - Event Engine foundation;
+- Process Engine foundation;
 - `GET /health`;
 - `GET /health/ready`;
 - минимальный тест health controller.
@@ -67,6 +68,32 @@ GET /api/v1/events/:id
 
 `type` принимает только значения из `09_Event_Bible/001_EVENT_TYPES.md`. Произвольные event types запрещены.
 
+## Process Foundation API
+
+Технические endpoints Process Engine доступны без auth только для проверки жизненного цикла процесса:
+
+```http
+POST /api/v1/processes
+GET /api/v1/processes
+GET /api/v1/processes/:id
+PATCH /api/v1/processes/:id/start
+PATCH /api/v1/processes/:id/pause
+PATCH /api/v1/processes/:id/complete
+PATCH /api/v1/processes/:id/cancel
+```
+
+Пример создания процесса:
+
+```json
+{
+  "type": "WORK_DAY",
+  "title": "Рабочий день",
+  "description": "Технический процесс для проверки Process Engine foundation"
+}
+```
+
+`Process` хранит только текущее состояние жизненного цикла. История процесса не хранится в `processes`; каждое изменение состояния создает запись в Event Engine с `entityType: "process"` и `entityId` процесса.
+
 ## Health endpoint
 
 ```http
@@ -108,10 +135,10 @@ GET /health/ready
 
 Prisma schema находится в `apps/backend/prisma/schema.prisma`.
 
-Initial database migration создана без доменных таблиц. Event foundation migration создает только таблицу `events` и enum `EventType` для памяти компании. Она не создает `users`, `tasks`, `photos`, `coins` или другие бизнес-сущности.
+Initial database migration создана без доменных таблиц. Event foundation migration создает таблицу `events` и enum `EventType` для памяти компании. Process foundation migration создает таблицу `processes` и enum `ProcessStatus` для текущего состояния процесса. Эти migrations не создают `users`, `tasks`, `photos`, `coins` или другие бизнес-сущности.
 
 Prisma CLI использует корневой `.env`. Перед запуском `npm run prisma:generate`, `npm run prisma:migrate` или `npm run prisma:studio` из корня проекта должен существовать локальный `.env`, созданный из `.env.example`.
 
 ## Ограничения
 
-На текущем этапе не реализованы бизнес-модули, auth, users, tasks, photos, coins или AI. Event module является только техническим фундаментом памяти компании.
+На текущем этапе не реализованы бизнес-модули, auth, users, tasks, photos, coins или AI. Event module является техническим фундаментом памяти компании. Process module является техническим фундаментом жизненного цикла процесса.

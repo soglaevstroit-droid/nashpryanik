@@ -8,5 +8,6 @@ import { EventService } from './event.service.js';
   imports: [DatabaseModule],
   controllers: [EventController],
   providers: [EventRepository, EventService],
+  exports: [EventService],
 })
 export class EventModule {}

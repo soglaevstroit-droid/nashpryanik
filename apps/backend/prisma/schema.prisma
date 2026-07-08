@@ -64,6 +64,14 @@ enum EventType {
   SYSTEM_UPDATED
 }
 
+enum ProcessStatus {
+  CREATED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
 model Event {
   id         String    @id @default(uuid())
   type       EventType
@@ -79,4 +87,21 @@ model Event {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("events")
+}
+
+model Process {
+  id          String        @id @default(uuid())
+  type        String
+  status      ProcessStatus @default(CREATED)
+  title       String
+  description String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+  @@map("processes")
 }
