@@ -24,4 +24,8 @@ export class AppConfigService {
   get jwtSecret(): string {
     return this.config.jwtSecret;
   }
+
+  get minio(): AppConfig['minio'] {
+    return this.config.minio;
+  }
 }

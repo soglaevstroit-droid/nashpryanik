@@ -9,6 +9,16 @@ export interface AppConfig {
   port: number;
   databaseUrl: string;
   jwtSecret: string;
+  minio: MinioConfig;
+}
+
+export interface MinioConfig {
+  endPoint: string;
+  port: number;
+  useSSL: boolean;
+  accessKey: string;
+  secretKey: string;
+  bucket: string;
 }
 
 const allowedEnvironments = new Set<AppEnvironment>(['development', 'test', 'production']);
@@ -87,6 +97,20 @@ function readPort(value: string | undefined): number {
   return port;
 }
 
+function readMinioPort(value: string | undefined): number {
+  const port = Number(value ?? 9000);
+
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    return 9000;
+  }
+
+  return port;
+}
+
+function readBoolean(value: string | undefined): boolean {
+  return value === 'true' || value === '1';
+}
+
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const fileEnv = loadFileEnvironment();
   const runtimeEnv = {
@@ -100,5 +124,13 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: readPort(runtimeEnv.BACKEND_PORT),
     databaseUrl: runtimeEnv.DATABASE_URL ?? fallbackDatabaseUrl,
     jwtSecret: runtimeEnv.JWT_SECRET ?? fallbackJwtSecret,
+    minio: {
+      endPoint: runtimeEnv.MINIO_HOST ?? 'localhost',
+      port: readMinioPort(runtimeEnv.MINIO_API_PORT),
+      useSSL: readBoolean(runtimeEnv.MINIO_USE_SSL),
+      accessKey: runtimeEnv.MINIO_ROOT_USER ?? 'stroit_minio',
+      secretKey: runtimeEnv.MINIO_ROOT_PASSWORD ?? 'stroit_minio_password',
+      bucket: runtimeEnv.MINIO_DEFAULT_BUCKET ?? 'stroit-dev',
+    },
   };
 }

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Role } from '@prisma/client';
+import { ArtifactController } from '../artifacts/artifact.controller.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { EventService } from '../events/event.service.js';
 import { EventController } from '../events/event.controller.js';
@@ -320,6 +321,36 @@ test('task step controller allows finance read', () => {
   assert.equal(
     guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
     true,
+  );
+});
+
+test('artifact controller allows worker upload and rejects finance upload', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = ArtifactController.prototype.uploadPhoto as () => unknown;
+  const controller = ArtifactController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('artifact controller allows finance read and rejects partner read', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = ArtifactController.prototype.listPhotos as () => unknown;
+  const controller = ArtifactController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('FINANCE'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('PARTNER'), handler, controller)),
+    /Forbidden/,
   );
 });
 

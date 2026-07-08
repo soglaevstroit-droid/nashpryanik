@@ -120,6 +120,10 @@ enum TaskStepStatus {
   CANCELLED
 }
 
+enum ArtifactType {
+  PHOTO
+}
+
 model Event {
   id         String    @id @default(uuid())
   type       EventType
@@ -225,4 +229,26 @@ model TaskStep {
   @@index([order])
   @@index([createdAt])
   @@map("task_steps")
+}
+
+model Artifact {
+  id               String       @id @default(uuid())
+  type             ArtifactType @default(PHOTO)
+  eventId          String
+  taskId           String?
+  taskStepId       String?
+  uploadedBy       String
+  storageKey       String
+  originalFileName String
+  mimeType         String
+  fileSize         Int
+  createdAt        DateTime     @default(now())
+
+  @@index([type])
+  @@index([eventId])
+  @@index([taskId])
+  @@index([taskStepId])
+  @@index([uploadedBy])
+  @@index([createdAt])
+  @@map("artifacts")
 }

@@ -27,6 +27,7 @@
 - Work Shift foundation;
 - Task foundation;
 - Task Step foundation;
+- Photo Artifact foundation;
 - `GET /health`;
 - `GET /health/ready`;
 - минимальный тест health controller.
@@ -247,6 +248,40 @@ PATCH /api/v1/task-steps/:id/cancel
 - каждое изменение создает событие `STEP_*` с `entityType: "task_step"`;
 - acceptance/review, фото, чек-листы, комментарии, монеты и AI здесь не реализованы.
 
+## Photo Artifact Foundation API
+
+Photo artifact endpoints защищены JWT и RBAC:
+
+```http
+POST /api/v1/artifacts/photos
+GET /api/v1/artifacts/:id
+GET /api/v1/events/:eventId/artifacts
+DELETE /api/v1/artifacts/:id
+```
+
+`POST /api/v1/artifacts/photos` принимает `multipart/form-data`:
+
+- `file` — обязательный файл фотографии;
+- `taskId` — опциональная дополнительная связь с Task;
+- `taskStepId` — опциональная дополнительная связь с TaskStep.
+
+Доступ:
+
+- `CREATOR`, `DIRECTOR`, `FOREMAN`, `WORKER` — загрузка и удаление фото, чтение артефактов;
+- `FINANCE` — только чтение;
+- `PARTNER` — доступа к artifact endpoints нет.
+
+Правила foundation:
+
+- фотография не существует сама по себе;
+- загрузка фотографии всегда создает событие `PHOTO_UPLOADED`;
+- `Artifact.eventId` указывает на событие `PHOTO_UPLOADED`;
+- `taskId` и `taskStepId` являются дополнительными связями, а не основной причиной существования фото;
+- бинарный файл хранится в MinIO, PostgreSQL хранит только метаданные и `storageKey`;
+- разрешены MIME-типы `image/jpeg`, `image/png`, `image/webp`;
+- максимальный размер фото — 10 MB;
+- галерея, AI, распознавание, EXIF, watermark, комментарии и приемка здесь не реализованы.
+
 ## Health endpoint
 
 ```http
@@ -288,10 +323,10 @@ GET /health/ready
 
 Prisma schema находится в `apps/backend/prisma/schema.prisma`.
 
-Initial database migration создана без доменных таблиц. Event foundation migration создает таблицу `events` и enum `EventType` для памяти компании. Process foundation migration создает таблицу `processes` и enum `ProcessStatus` для текущего состояния процесса. Auth foundation migration создает `users` и enum `Role`. Work Shift foundation migration создает `work_shifts` и enum `WorkShiftStatus`. Task foundation migration создает `tasks`, `TaskStatus` и `TaskPriority`. Task Step foundation migration создает `task_steps`, `TaskStepStatus` и `STEP_CANCELLED`. Эти migrations не создают `photos`, `coins` или AI-сущности.
+Initial database migration создана без доменных таблиц. Event foundation migration создает таблицу `events` и enum `EventType` для памяти компании. Process foundation migration создает таблицу `processes` и enum `ProcessStatus` для текущего состояния процесса. Auth foundation migration создает `users` и enum `Role`. Work Shift foundation migration создает `work_shifts` и enum `WorkShiftStatus`. Task foundation migration создает `tasks`, `TaskStatus` и `TaskPriority`. Task Step foundation migration создает `task_steps`, `TaskStepStatus` и `STEP_CANCELLED`. Photo Artifact foundation migration создает `artifacts` и `ArtifactType`. Эти migrations не создают `coins` или AI-сущности.
 
 Prisma CLI использует корневой `.env`. Перед запуском `npm run prisma:generate`, `npm run prisma:migrate` или `npm run prisma:studio` из корня проекта должен существовать локальный `.env`, созданный из `.env.example`.
 
 ## Ограничения
 
-На текущем этапе не реализованы photos, coins или AI. Event module является техническим фундаментом памяти компании. Process module является техническим фундаментом жизненного цикла процесса. Work Shift module является первым бизнес-доменом и хранит только факт активной или завершенной смены. Task module является первым foundation для управляемой работы и хранит только текущее состояние задачи. Task Step module хранит текущие шаги выполнения задачи без acceptance/review и без вложенной истории.
+На текущем этапе не реализованы coins или AI. Event module является техническим фундаментом памяти компании. Process module является техническим фундаментом жизненного цикла процесса. Work Shift module является первым бизнес-доменом и хранит только факт активной или завершенной смены. Task module является первым foundation для управляемой работы и хранит только текущее состояние задачи. Task Step module хранит текущие шаги выполнения задачи без acceptance/review и без вложенной истории. Artifact module хранит фото как артефакт события и использует MinIO для бинарных файлов.

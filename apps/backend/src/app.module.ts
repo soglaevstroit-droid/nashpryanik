@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ArtifactModule } from './artifacts/artifact.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { CommonModule } from './common/common.module.js';
 import { AppConfigModule } from './config/app-config.module.js';
@@ -28,6 +29,7 @@ import { WorkShiftModule } from './work-shifts/work-shift.module.js';
     WorkShiftModule,
     TaskModule,
     TaskStepModule,
+    ArtifactModule,
   ],
 })
 export class AppModule {}
