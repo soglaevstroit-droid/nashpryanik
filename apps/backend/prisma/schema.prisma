@@ -87,6 +87,12 @@ enum Role {
   PARTNER
 }
 
+enum WorkShiftStatus {
+  NOT_STARTED
+  ACTIVE
+  FINISHED
+}
+
 model Event {
   id         String    @id @default(uuid())
   type       EventType
@@ -134,4 +140,21 @@ model User {
   @@index([role])
   @@index([isActive])
   @@map("users")
+}
+
+model WorkShift {
+  id         String          @id @default(uuid())
+  userId     String
+  processId  String?
+  status     WorkShiftStatus @default(ACTIVE)
+  startedAt  DateTime
+  finishedAt DateTime?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([startedAt])
+  @@index([processId])
+  @@map("work_shifts")
 }

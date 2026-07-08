@@ -9,6 +9,7 @@ import { LoggerModule } from './logger/logger.module.js';
 import { ProcessModule } from './processes/process.module.js';
 import { RolesModule } from './roles/roles.module.js';
 import { UserModule } from './users/user.module.js';
+import { WorkShiftModule } from './work-shifts/work-shift.module.js';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { UserModule } from './users/user.module.js';
     UserModule,
     RolesModule,
     AuthModule,
+    WorkShiftModule,
   ],
 })
 export class AppModule {}

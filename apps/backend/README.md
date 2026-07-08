@@ -24,6 +24,7 @@
 - Process Engine foundation;
 - Authentication foundation;
 - RBAC foundation;
+- Work Shift foundation;
 - `GET /health`;
 - `GET /health/ready`;
 - минимальный тест health controller.
@@ -135,6 +136,27 @@ PATCH /api/v1/processes/:id/cancel
 
 `Process` хранит только текущее состояние жизненного цикла. История процесса не хранится в `processes`; каждое изменение состояния создает запись в Event Engine с явным `PROCESS_*` event type, `entityType: "process"` и `entityId` процесса.
 
+## Work Shift Foundation API
+
+Work Shift endpoints защищены JWT и работают для текущего авторизованного пользователя:
+
+```http
+POST /api/v1/work-shifts/start
+POST /api/v1/work-shifts/finish
+GET /api/v1/work-shifts/current
+GET /api/v1/work-shifts/history
+```
+
+Правила foundation:
+
+- у пользователя может быть только одна активная смена;
+- начало смены создает `WorkShift` со статусом `ACTIVE`;
+- начало смены создает и запускает Process `WORK_SHIFT`;
+- завершение смены переводит `WorkShift` в `FINISHED`;
+- завершение смены завершает связанный Process;
+- начало и завершение смены создают события `WORK_SHIFT_STARTED` и `WORK_SHIFT_FINISHED`;
+- задачи, фото, геолокация, таймеры, начисления, монеты и AI здесь не реализованы.
+
 ## Health endpoint
 
 ```http
@@ -176,10 +198,10 @@ GET /health/ready
 
 Prisma schema находится в `apps/backend/prisma/schema.prisma`.
 
-Initial database migration создана без доменных таблиц. Event foundation migration создает таблицу `events` и enum `EventType` для памяти компании. Process foundation migration создает таблицу `processes` и enum `ProcessStatus` для текущего состояния процесса. Эти migrations не создают `users`, `tasks`, `photos`, `coins` или другие бизнес-сущности.
+Initial database migration создана без доменных таблиц. Event foundation migration создает таблицу `events` и enum `EventType` для памяти компании. Process foundation migration создает таблицу `processes` и enum `ProcessStatus` для текущего состояния процесса. Auth foundation migration создает `users` и enum `Role`. Work Shift foundation migration создает `work_shifts` и enum `WorkShiftStatus`. Эти migrations не создают `tasks`, `photos`, `coins` или AI-сущности.
 
 Prisma CLI использует корневой `.env`. Перед запуском `npm run prisma:generate`, `npm run prisma:migrate` или `npm run prisma:studio` из корня проекта должен существовать локальный `.env`, созданный из `.env.example`.
 
 ## Ограничения
 
-На текущем этапе не реализованы бизнес-модули, auth, users, tasks, photos, coins или AI. Event module является техническим фундаментом памяти компании. Process module является техническим фундаментом жизненного цикла процесса.
+На текущем этапе не реализованы tasks, photos, coins или AI. Event module является техническим фундаментом памяти компании. Process module является техническим фундаментом жизненного цикла процесса. Work Shift module является первым бизнес-доменом и хранит только факт активной или завершенной смены.
