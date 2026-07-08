@@ -10,6 +10,7 @@ NestJS backend foundation.
 - `database` — Prisma/PostgreSQL foundation без доменных моделей;
 - `health` — endpoint `GET /health`;
 - `health/ready` — readiness endpoint с проверкой подключения к базе;
+- `events` — технический фундамент Event Engine для памяти компании;
 - global exception filter — единый foundation для ошибок.
 
-На текущем этапе здесь нет бизнес-модулей, доменных сущностей, auth, users, tasks, events, photos, coins или AI.
+На текущем этапе здесь нет бизнес-модулей, auth, users, tasks, photos, coins или AI. Модуль `events` не реализует бизнес-процессы, а только сохраняет события утвержденных типов.

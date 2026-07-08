@@ -1,0 +1,60 @@
+import { Injectable } from '@nestjs/common';
+import { Event, Prisma } from '@prisma/client';
+import { DatabaseService } from '../database/database.service.js';
+import { CreateEventDto } from './dto/create-event.dto.js';
+import { EventRecord } from './event-record.js';
+import { EventType } from './event-types.js';
+
+@Injectable()
+export class EventRepository {
+  constructor(private readonly database: DatabaseService) {}
+
+  async create(data: CreateEventDto): Promise<EventRecord> {
+    const event = await this.database.event.create({
+      data: {
+        type: data.type,
+        actorId: data.actorId ?? null,
+        entityType: data.entityType ?? null,
+        entityId: data.entityId ?? null,
+        payload: data.payload,
+        metadata: data.metadata ?? Prisma.DbNull,
+      },
+    });
+
+    return this.toRecord(event);
+  }
+
+  async findById(id: string): Promise<EventRecord | null> {
+    const event = await this.database.event.findUnique({
+      where: {
+        id,
+      },
+    });
+
+    return event ? this.toRecord(event) : null;
+  }
+
+  async findMany(limit: number): Promise<EventRecord[]> {
+    const events = await this.database.event.findMany({
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: limit,
+    });
+
+    return events.map((event) => this.toRecord(event));
+  }
+
+  private toRecord(event: Event): EventRecord {
+    return {
+      id: event.id,
+      type: event.type as EventType,
+      actorId: event.actorId,
+      entityType: event.entityType,
+      entityId: event.entityId,
+      payload: event.payload,
+      metadata: event.metadata,
+      createdAt: event.createdAt,
+    };
+  }
+}

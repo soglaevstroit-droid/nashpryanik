@@ -20,6 +20,7 @@
 - logger foundation;
 - global error foundation;
 - Prisma/PostgreSQL database foundation;
+- Event Engine foundation;
 - `GET /health`;
 - `GET /health/ready`;
 - минимальный тест health controller.
@@ -36,6 +37,35 @@ npm run prisma:migrate
 npm run prisma:studio
 npm run backend:db:check
 ```
+
+## Event Foundation API
+
+Технические endpoints Event Engine доступны без auth только для проверки фундамента памяти компании:
+
+```http
+POST /api/v1/events
+GET /api/v1/events
+GET /api/v1/events/:id
+```
+
+Пример создания события:
+
+```json
+{
+  "type": "SYSTEM_UPDATED",
+  "actorId": null,
+  "entityType": "platform",
+  "entityId": "backend",
+  "payload": {
+    "source": "event-foundation"
+  },
+  "metadata": {
+    "environment": "development"
+  }
+}
+```
+
+`type` принимает только значения из `09_Event_Bible/001_EVENT_TYPES.md`. Произвольные event types запрещены.
 
 ## Health endpoint
 
@@ -78,10 +108,10 @@ GET /health/ready
 
 Prisma schema находится в `apps/backend/prisma/schema.prisma`.
 
-Initial migration создана без доменных таблиц. Она фиксирует migration foundation, но не создает `users`, `tasks`, `photos`, `coins`, `events` или другие бизнес-сущности.
+Initial database migration создана без доменных таблиц. Event foundation migration создает только таблицу `events` и enum `EventType` для памяти компании. Она не создает `users`, `tasks`, `photos`, `coins` или другие бизнес-сущности.
 
 Prisma CLI использует корневой `.env`. Перед запуском `npm run prisma:generate`, `npm run prisma:migrate` или `npm run prisma:studio` из корня проекта должен существовать локальный `.env`, созданный из `.env.example`.
 
 ## Ограничения
 
-На текущем этапе не реализованы бизнес-модули, доменные сущности, auth, users, tasks, events, photos, coins или AI.
+На текущем этапе не реализованы бизнес-модули, auth, users, tasks, photos, coins или AI. Event module является только техническим фундаментом памяти компании.
