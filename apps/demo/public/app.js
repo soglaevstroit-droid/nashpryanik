@@ -15,7 +15,7 @@ const elements = {
   logoutButton: document.querySelector('#logoutButton'),
   userInfo: document.querySelector('#userInfo'),
   shiftStatus: document.querySelector('#shiftStatus'),
-  startShiftButton: document.querySelector('#startShiftButton'),
+  mainShiftButton: document.querySelector('#mainShiftButton'),
   finishShiftButton: document.querySelector('#finishShiftButton'),
   todayShift: document.querySelector('#todayShift'),
   todayTasks: document.querySelector('#todayTasks'),
@@ -26,11 +26,15 @@ const elements = {
   createDemoTaskButton: document.querySelector('#createDemoTaskButton'),
   tasksList: document.querySelector('#tasksList'),
   taskScreen: document.querySelector('#taskScreen'),
+  taskObject: document.querySelector('#taskObject'),
+  taskRoom: document.querySelector('#taskRoom'),
   taskTitle: document.querySelector('#taskTitle'),
   taskMeta: document.querySelector('#taskMeta'),
   taskDescription: document.querySelector('#taskDescription'),
-  reloadTaskButton: document.querySelector('#reloadTaskButton'),
   stepsList: document.querySelector('#stepsList'),
+  photoBlock: document.querySelector('#photoBlock'),
+  photoHint: document.querySelector('#photoHint'),
+  photoInput: document.querySelector('#photoInput'),
   loadEventsButton: document.querySelector('#loadEventsButton'),
   eventsList: document.querySelector('#eventsList'),
   messagePanel: document.querySelector('#messagePanel'),
@@ -41,17 +45,13 @@ elements.loginForm.addEventListener('submit', async (event) => {
   await login();
 });
 elements.logoutButton.addEventListener('click', logout);
-elements.startShiftButton.addEventListener('click', () => mutateShift('/work-shifts/start'));
+elements.mainShiftButton.addEventListener('click', handleMainShiftAction);
 elements.finishShiftButton.addEventListener('click', () => mutateShift('/work-shifts/finish'));
 elements.refreshAllButton.addEventListener('click', refreshWorkspace);
 elements.loadTasksButton.addEventListener('click', loadTasks);
 elements.createDemoTaskButton.addEventListener('click', createDemoTask);
-elements.reloadTaskButton.addEventListener('click', () => {
-  if (state.currentTask) {
-    openTask(state.currentTask.id);
-  }
-});
 elements.loadEventsButton.addEventListener('click', refreshWorkspace);
+elements.photoInput.addEventListener('change', () => uploadPhoto(resolvePhotoStepId(), elements.photoInput));
 
 renderAuthState();
 
@@ -134,6 +134,20 @@ async function mutateShift(path) {
   } catch (error) {
     showError(error);
   }
+}
+
+async function handleMainShiftAction() {
+  if (!state.shift) {
+    await mutateShift('/work-shifts/start');
+    return;
+  }
+
+  if (state.currentTask) {
+    elements.taskScreen.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+
+  await mutateShift('/work-shifts/finish');
 }
 
 async function loadTasks() {
@@ -237,7 +251,7 @@ async function completeStep(stepId) {
 async function uploadPhoto(stepId, input) {
   const file = input.files?.[0];
 
-  if (!file || !state.currentTask) {
+  if (!file || !state.currentTask || !stepId) {
     showError(new Error('Выберите файл фотографии.'));
     return;
   }
@@ -292,6 +306,7 @@ function renderWorkspace(workspace) {
   } else {
     elements.taskScreen.hidden = true;
     renderEmpty(elements.stepsList, 'Текущей задачи нет.');
+    renderPhotoBlock([]);
   }
 
   renderEvents(workspace.myEvents);
@@ -333,18 +348,27 @@ function renderAuthState() {
   elements.logoutButton.hidden = !isLoggedIn;
 
   if (state.user) {
-    elements.userInfo.textContent = `${state.user.name ?? state.user.email} · ${state.user.role}`;
+    elements.userInfo.textContent = state.user.name ?? state.user.email;
   }
 
   elements.createDemoTaskButton.hidden = !canManageTasks();
 }
 
 function renderShift() {
-  elements.shiftStatus.textContent = state.shift ? state.shift.status : 'Смена не начата';
+  const isActive = state.shift?.status === 'ACTIVE';
+
+  elements.shiftStatus.textContent = isActive ? 'Смена активна' : 'Смена не начата';
+  elements.shiftStatus.classList.toggle('active', isActive);
+  elements.mainShiftButton.textContent = !isActive
+    ? 'Начать смену'
+    : state.currentTask
+      ? 'Продолжить работу'
+      : 'Завершить смену';
+  elements.finishShiftButton.hidden = !isActive;
 }
 
 function renderToday(today) {
-  elements.todayShift.textContent = today.shiftStatus === 'ACTIVE' ? 'Активна' : today.shiftStatus;
+  elements.todayShift.textContent = today.shiftStatus === 'ACTIVE' ? 'Активна' : 'Не начата';
   elements.todayTasks.textContent = String(today.tasksCount);
   elements.todaySteps.textContent = `${today.activeStepsCount} активных`;
   elements.todayLastAction.textContent = today.lastAction
@@ -367,7 +391,7 @@ function renderTasks(tasks) {
     item.innerHTML = `
       <div>
         <div class="itemTitle">${escapeHtml(task.title)}</div>
-        <div class="itemMeta">Статус: ${escapeHtml(task.status)} · Приоритет: ${escapeHtml(task.priority)}</div>
+        <div class="itemMeta">${escapeHtml(formatStatus(task.status))}</div>
       </div>
       <div class="itemActions">
         <button type="button" data-open-task="${escapeHtml(task.id)}">Открыть</button>
@@ -380,8 +404,13 @@ function renderTasks(tasks) {
 
 function renderTask(task) {
   elements.taskScreen.hidden = false;
+  const location = parseTaskLocation(task);
+
+  elements.taskObject.textContent = location.object;
+  elements.taskRoom.textContent = location.room;
   elements.taskTitle.textContent = task.title;
-  elements.taskMeta.textContent = `Статус: ${task.status} · ID: ${task.id}`;
+  elements.taskMeta.textContent = formatStatus(task.status);
+  elements.taskMeta.classList.toggle('active', task.status === 'IN_PROGRESS');
   elements.taskDescription.textContent = task.description || 'Описание не заполнено.';
 }
 
@@ -391,23 +420,22 @@ function renderSteps(steps) {
 
   if (steps.length === 0) {
     elements.stepsList.textContent = 'Этапы пока не созданы.';
+    renderPhotoBlock([]);
     return;
   }
 
   for (const step of steps) {
+    const status = formatStepStatus(step.status);
     const item = document.createElement('article');
     item.className = 'item';
     item.innerHTML = `
-      <div>
+      <div class="stepStatus ${step.status === 'IN_PROGRESS' ? 'active' : ''} ${step.status === 'COMPLETED' ? 'done' : ''}">
         <div class="itemTitle">${escapeHtml(step.order)}. ${escapeHtml(step.title)}</div>
-        <div class="itemMeta">Статус: ${escapeHtml(step.status)} · ID: ${escapeHtml(step.id)}</div>
+        <div class="itemMeta">${escapeHtml(status)}</div>
       </div>
       <div class="itemActions">
         <button type="button" data-start-step="${escapeHtml(step.id)}">Начать</button>
         <button type="button" data-complete-step="${escapeHtml(step.id)}">Завершить</button>
-      </div>
-      <div class="uploadRow" ${step.status === 'COMPLETED' ? '' : 'hidden'}>
-        <input type="file" accept="image/jpeg,image/png,image/webp" data-photo-step="${escapeHtml(step.id)}" />
       </div>
     `;
 
@@ -415,11 +443,10 @@ function renderSteps(steps) {
     item.querySelector('[data-complete-step]').disabled = step.status !== 'IN_PROGRESS';
     item.querySelector('[data-start-step]').addEventListener('click', () => startStep(step.id));
     item.querySelector('[data-complete-step]').addEventListener('click', () => completeStep(step.id));
-    item.querySelector('[data-photo-step]')?.addEventListener('change', (event) => {
-      uploadPhoto(step.id, event.currentTarget);
-    });
     elements.stepsList.append(item);
   }
+
+  renderPhotoBlock(steps);
 }
 
 function renderEvents(events) {
@@ -435,11 +462,25 @@ function renderEvents(events) {
     const item = document.createElement('article');
     item.className = 'item';
     item.innerHTML = `
+      <div class="itemMeta">${escapeHtml(formatEventTime(event.createdAt))}</div>
       <div class="itemTitle">${escapeHtml(formatEventType(event.type))}</div>
-      <div class="itemMeta">${escapeHtml(formatEventTime(event.createdAt))} · ${escapeHtml(event.entityType ?? 'no-entity')} · ${escapeHtml(event.entityId ?? 'no-id')}</div>
     `;
     elements.eventsList.append(item);
   }
+}
+
+function renderPhotoBlock(steps) {
+  const stepId = resolvePhotoStepId(steps);
+  const hasCompletedStep = Boolean(stepId);
+
+  elements.photoInput.disabled = !hasCompletedStep;
+  elements.photoHint.textContent = hasCompletedStep
+    ? 'Добавьте фото результата по завершённому этапу.'
+    : 'Завершите этап, чтобы добавить фото.';
+}
+
+function resolvePhotoStepId(steps = state.workspace?.currentSteps ?? []) {
+  return [...steps].reverse().find((step) => step.status === 'COMPLETED')?.id ?? null;
 }
 
 function renderEmpty(target, message) {
@@ -489,6 +530,43 @@ function formatEventType(type) {
   };
 
   return labels[type] ?? type;
+}
+
+function formatStatus(status) {
+  const labels = {
+    CREATED: 'Не начато',
+    ASSIGNED: 'Назначено',
+    ACCEPTED: 'Принято',
+    IN_PROGRESS: 'В работе',
+    ON_REVIEW: 'На проверке',
+    COMPLETED: 'Выполнено',
+    CANCELLED: 'Отменено',
+  };
+
+  return labels[status] ?? status;
+}
+
+function formatStepStatus(status) {
+  const labels = {
+    CREATED: 'Не начато',
+    IN_PROGRESS: 'В работе',
+    COMPLETED: 'Выполнено',
+    REOPENED: 'Открыто повторно',
+    CANCELLED: 'Отменено',
+  };
+
+  return labels[status] ?? status;
+}
+
+function parseTaskLocation(task) {
+  const description = task.description ?? '';
+  const objectMatch = description.match(/объект[:\s]+([^\n.;]+)/i);
+  const roomMatch = description.match(/помещение[:\s]+([^\n.;]+)/i);
+
+  return {
+    object: objectMatch?.[1]?.trim() || 'Объект не указан',
+    room: roomMatch?.[1]?.trim() || 'Помещение не указано',
+  };
 }
 
 function formatEventTime(value) {

@@ -3,21 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>СТРОИТ.РФ Demo Panel</title>
+    <title>СТРОИТ.РФ</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="shell">
-      <header class="topbar">
-        <div>
+      <section id="loginScreen" class="loginCard">
+        <div class="brandBlock">
+          <span class="accentLine"></span>
           <h1>СТРОИТ.РФ</h1>
-          <p>Первый рабочий demo panel</p>
+          <p>Рабочее место монтажника</p>
         </div>
-        <button id="logoutButton" class="ghost" type="button" hidden>Выйти</button>
-      </header>
-
-      <section id="loginScreen" class="panel narrow">
-        <h2>Авторизация</h2>
         <form id="loginForm" class="form">
           <label>
             Логин
@@ -27,44 +23,36 @@
             Пароль
             <input id="passwordInput" type="password" autocomplete="current-password" required />
           </label>
-          <button type="submit">Войти</button>
+          <button class="primaryAction" type="submit">Войти</button>
         </form>
       </section>
 
       <section id="workspaceScreen" class="workspace" hidden>
-        <section class="panel">
-          <div class="sectionHeader">
-            <div>
-              <h2>Рабочее место монтажника</h2>
-              <p id="userInfo">Пользователь не загружен</p>
-            </div>
-            <button id="refreshAllButton" type="button">Обновить</button>
+        <header class="workerHeader">
+          <div class="brandBlock compact">
+            <span class="accentLine"></span>
+            <h1>СТРОИТ.РФ</h1>
           </div>
-
-          <div class="statusGrid">
-            <div>
-              <span class="label">Смена</span>
-              <strong id="shiftStatus">Не загружена</strong>
-            </div>
-            <div>
-              <span class="label">Backend</span>
-              <strong id="backendStatus">/api/v1</strong>
-            </div>
+          <div class="workerMeta">
+            <span id="shiftStatus" class="shiftPill">Смена не начата</span>
+            <strong id="userInfo">Монтажник</strong>
           </div>
+          <button id="logoutButton" class="ghost" type="button" hidden>Выйти</button>
+        </header>
 
-          <div class="actions">
-            <button id="startShiftButton" type="button">Начать смену</button>
-            <button id="finishShiftButton" type="button">Завершить смену</button>
+        <section class="workHero">
+          <div>
+            <span class="eyebrow">Сегодня</span>
+            <h2 id="todayShift">Смена не начата</h2>
+            <p id="todayLastAction">Нет последних действий</p>
           </div>
-        </section>
-
-        <section class="panel">
-          <h2>Сегодня</h2>
-          <div class="todayGrid">
-            <div>
-              <span class="label">Смена</span>
-              <strong id="todayShift">Не начата</strong>
-            </div>
+          <div class="heroActions">
+            <button id="mainShiftButton" class="primaryAction large" type="button">Начать смену</button>
+            <button id="finishShiftButton" class="ghost largeSecondary" type="button" hidden>
+              Завершить смену
+            </button>
+          </div>
+          <div class="heroStats">
             <div>
               <span class="label">Задач</span>
               <strong id="todayTasks">0</strong>
@@ -73,55 +61,64 @@
               <span class="label">Этап</span>
               <strong id="todaySteps">0 активных</strong>
             </div>
-            <div>
-              <span class="label">Последнее действие</span>
-              <strong id="todayLastAction">Нет событий</strong>
-            </div>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="sectionHeader">
-            <div>
-              <h2>Мои задачи</h2>
-              <p>Для WORKER используется /api/v1/tasks/my.</p>
-            </div>
-            <div class="toolbar">
-              <button id="loadTasksButton" type="button">Получить список</button>
-              <button id="createDemoTaskButton" type="button">Создать демо-задачу</button>
-            </div>
+        <section id="taskScreen" class="workCard currentTaskCard" hidden>
+          <div class="cardHeader">
+            <span class="eyebrow">Текущая задача</span>
+            <button id="refreshAllButton" class="iconButton" type="button" aria-label="Обновить">
+              Обновить
+            </button>
           </div>
-          <div id="tasksList" class="list empty">Задачи ещё не загружены.</div>
-        </section>
-
-        <section id="taskScreen" class="panel" hidden>
-          <div class="sectionHeader">
-            <div>
-              <h2 id="taskTitle">Задача</h2>
-              <p id="taskMeta">Статус не загружен</p>
-            </div>
-            <button id="reloadTaskButton" type="button">Обновить задачу</button>
+          <div class="taskLocation">
+            <span id="taskObject">Объект не указан</span>
+            <span id="taskRoom">Помещение не указано</span>
           </div>
+          <h2 id="taskTitle">Задача не выбрана</h2>
           <p id="taskDescription" class="description"></p>
-
-          <div class="sectionHeader compact">
-            <div>
-              <h3>Этапы</h3>
-              <p>Начало и завершение используют существующий Task Step API.</p>
-            </div>
+          <div class="taskStateRow">
+            <span id="taskMeta" class="statusBadge">Статус не загружен</span>
+            <span id="nextStepText" class="nextStep">Следующий шаг не определён</span>
           </div>
-          <div id="stepsList" class="list empty">Этапы ещё не загружены.</div>
         </section>
 
-        <section class="panel">
-          <div class="sectionHeader">
-            <div>
-              <h2>История событий</h2>
-              <p>Моя лента событий рабочего дня.</p>
-            </div>
-            <button id="loadEventsButton" type="button">Обновить историю</button>
+        <section class="workCard">
+          <div class="cardHeader">
+            <span class="eyebrow">Этапы</span>
           </div>
-          <div id="eventsList" class="list empty">События ещё не загружены.</div>
+          <div id="stepsList" class="stepsList empty">Этапы ещё не загружены.</div>
+        </section>
+
+        <section id="photoBlock" class="workCard photoCard">
+          <div>
+            <span class="eyebrow">Фотофиксация</span>
+            <h2>Фото результата</h2>
+            <p id="photoHint">Завершите этап, чтобы добавить фото.</p>
+          </div>
+          <label class="fileButton">
+            Добавить фото
+            <input id="photoInput" type="file" accept="image/jpeg,image/png,image/webp" />
+          </label>
+        </section>
+
+        <section class="workCard queueCard">
+          <div class="cardHeader">
+            <span class="eyebrow">Очередь задач</span>
+            <button id="loadTasksButton" class="ghost small" type="button">Обновить</button>
+          </div>
+          <div id="tasksList" class="compactList empty">Задачи ещё не загружены.</div>
+          <button id="createDemoTaskButton" class="ghost small" type="button" hidden>
+            Создать демо-задачу
+          </button>
+        </section>
+
+        <section class="workCard">
+          <div class="cardHeader">
+            <span class="eyebrow">История работы</span>
+            <button id="loadEventsButton" class="ghost small" type="button">Обновить</button>
+          </div>
+          <div id="eventsList" class="timeline empty">События ещё не загружены.</div>
         </section>
       </section>
 
