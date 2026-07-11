@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ProcessStatus } from '@prisma/client';
+import { Prisma, ProcessStatus } from '@prisma/client';
 import { EventService } from '../events/event.service.js';
 import { EventType } from '../events/event-types.js';
 import { CreateProcessDto } from './dto/create-process.dto.js';
@@ -15,27 +15,31 @@ export class ProcessService {
     private readonly events: EventService,
   ) {}
 
-  async createProcess(dto: CreateProcessDto): Promise<ProcessRecord> {
+  async createProcess(
+    dto: CreateProcessDto,
+    client?: Prisma.TransactionClient,
+  ): Promise<ProcessRecord> {
     this.assertCreateProcessDto(dto);
 
-    const process = await this.repository.create(dto);
-    await this.createProcessEvent(process, 'PROCESS_CREATED');
+    const process = await this.repository.create(dto, client);
+    await this.createProcessEvent(process, 'PROCESS_CREATED', client);
 
     return process;
   }
 
-  async startProcess(id: string): Promise<ProcessRecord> {
-    const process = await this.getProcess(id);
+  async startProcess(id: string, client?: Prisma.TransactionClient): Promise<ProcessRecord> {
+    const process = await this.getProcess(id, client);
     this.assertTransition(process, ['CREATED', 'PAUSED'], 'start');
 
     const startedAt = process.startedAt ?? new Date();
     const updated = await this.repository.updateStatus(id, 'ACTIVE', {
       startedAt,
       finishedAt: undefined,
-    });
+    }, client);
     await this.createProcessEvent(
       updated,
       process.status === 'PAUSED' ? 'PROCESS_RESUMED' : 'PROCESS_STARTED',
+      client,
     );
 
     return updated;
@@ -51,14 +55,14 @@ export class ProcessService {
     return updated;
   }
 
-  async completeProcess(id: string): Promise<ProcessRecord> {
-    const process = await this.getProcess(id);
+  async completeProcess(id: string, client?: Prisma.TransactionClient): Promise<ProcessRecord> {
+    const process = await this.getProcess(id, client);
     this.assertTransition(process, ['ACTIVE', 'PAUSED'], 'complete');
 
     const updated = await this.repository.updateStatus(id, 'COMPLETED', {
       finishedAt: new Date(),
-    });
-    await this.createProcessEvent(updated, 'PROCESS_COMPLETED');
+    }, client);
+    await this.createProcessEvent(updated, 'PROCESS_COMPLETED', client);
 
     return updated;
   }
@@ -75,12 +79,12 @@ export class ProcessService {
     return updated;
   }
 
-  async getProcess(id: string): Promise<ProcessRecord> {
+  async getProcess(id: string, client?: Prisma.TransactionClient): Promise<ProcessRecord> {
     if (!id) {
       throw new BadRequestException('Process id is required');
     }
 
-    const process = await this.repository.findById(id);
+    const process = await this.repository.findById(id, client);
 
     if (!process) {
       throw new NotFoundException('Process not found');
@@ -116,7 +120,11 @@ export class ProcessService {
     }
   }
 
-  private async createProcessEvent(process: ProcessRecord, type: EventType): Promise<void> {
+  private async createProcessEvent(
+    process: ProcessRecord,
+    type: EventType,
+    client?: Prisma.TransactionClient,
+  ): Promise<void> {
     await this.events.createEvent({
       type,
       entityType: 'process',
@@ -128,7 +136,7 @@ export class ProcessService {
       metadata: {
         source: 'process-engine',
       },
-    });
+    }, client);
   }
 }
 

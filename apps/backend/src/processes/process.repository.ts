@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Process, ProcessStatus } from '@prisma/client';
+import { Prisma, Process, ProcessStatus } from '@prisma/client';
 import { DatabaseService } from '../database/database.service.js';
 import { CreateProcessDto } from './dto/create-process.dto.js';
 import { ProcessRecord } from './process-record.js';
@@ -8,8 +8,11 @@ import { ProcessRecord } from './process-record.js';
 export class ProcessRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async create(data: CreateProcessDto): Promise<ProcessRecord> {
-    const process = await this.database.process.create({
+  async create(
+    data: CreateProcessDto,
+    client: Prisma.TransactionClient = this.database,
+  ): Promise<ProcessRecord> {
+    const process = await client.process.create({
       data: {
         type: data.type,
         title: data.title,
@@ -20,8 +23,11 @@ export class ProcessRepository {
     return this.toRecord(process);
   }
 
-  async findById(id: string): Promise<ProcessRecord | null> {
-    const process = await this.database.process.findUnique({
+  async findById(
+    id: string,
+    client: Prisma.TransactionClient = this.database,
+  ): Promise<ProcessRecord | null> {
+    const process = await client.process.findUnique({
       where: {
         id,
       },
@@ -48,8 +54,9 @@ export class ProcessRepository {
       startedAt?: Date;
       finishedAt?: Date;
     } = {},
+    client: Prisma.TransactionClient = this.database,
   ): Promise<ProcessRecord> {
-    const process = await this.database.process.update({
+    const process = await client.process.update({
       where: {
         id,
       },

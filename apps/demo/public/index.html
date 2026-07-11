@@ -7,122 +7,471 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <section id="loginScreen" class="loginCard">
-        <div class="brandBlock">
-          <span class="accentLine"></span>
-          <h1>СТРОИТ.РФ</h1>
-          <p>Рабочее место монтажника</p>
+    <main class="phoneShell">
+      <section id="loginScreen" class="screen screenLogin is-active" data-smoke="00_Login">
+        <div class="statusBar">
+          <strong>9:41</strong>
+          <span>●●● 􀙇</span>
         </div>
-        <form id="loginForm" class="form">
+        <div class="loginHero" aria-hidden="true">
+          <div class="buildingSketch"></div>
+          <i></i>
+        </div>
+        <form id="loginForm" class="loginPanel">
+          <h1>Вход в систему</h1>
+          <p>Введите свои данные для входа</p>
           <label>
             Логин
-            <input id="emailInput" type="email" autocomplete="username" required />
+            <span class="inputWrap">
+              <b>⌾</b>
+              <input id="emailInput" type="email" autocomplete="username" placeholder="Введите email" />
+            </span>
           </label>
           <label>
             Пароль
-            <input id="passwordInput" type="password" autocomplete="current-password" required />
+            <span class="inputWrap">
+              <b>⌑</b>
+              <input
+                id="passwordInput"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Введите пароль"
+              />
+              <em>◉</em>
+            </span>
           </label>
-          <button class="primaryAction" type="submit">Войти</button>
+          <div class="loginOptions">
+            <span><mark>✓</mark> Запомнить меня</span>
+            <a href="#">Забыли пароль?</a>
+          </div>
+          <button class="primaryButton" type="submit">Войти</button>
+          <small>Версия v0.0.2</small>
         </form>
       </section>
 
-      <section id="workspaceScreen" class="workspace" hidden>
-        <header class="workerHeader">
-          <div class="brandBlock compact">
-            <span class="accentLine"></span>
-            <h1>СТРОИТ.РФ</h1>
+      <section id="workspaceScreen" class="screen appScreen" data-smoke="01_Moya_Rabota" hidden>
+        <div class="statusBar">
+          <strong>9:41</strong>
+          <span>●●● 􀙇</span>
+        </div>
+
+        <header class="workerTop">
+          <div class="workerTopMain">
+            <div class="workerPerson">
+              <img class="avatar" src="/assets/ilya-profile.png" alt="" />
+              <div>
+                <small>Добро пожаловать,</small>
+                <strong id="userInfo">Илья Н.</strong>
+              </div>
+            </div>
+            <div class="coinBox">
+              <strong><span id="totalCoinBalance">12 540</span> <span class="coinIcon"></span></strong>
+            </div>
           </div>
-          <div class="workerMeta">
-            <span id="shiftStatus" class="shiftPill">Смена не начата</span>
-            <strong id="userInfo">Монтажник</strong>
+          <div class="workerDivider"></div>
+          <div class="workerStats">
+            <div>
+              <small>Статус</small>
+              <strong id="workerShiftStatus">Отдыхает</strong>
+            </div>
+            <div>
+              <small>Начислено</small>
+              <strong id="shiftEarnedAmount">0,00</strong>
+            </div>
           </div>
-          <button id="logoutButton" class="ghost" type="button" hidden>Выйти</button>
+          <button id="startWorkButton" class="startWorkButton" type="button" data-shift-action>
+            НАЧАТЬ РАБОТУ
+          </button>
         </header>
 
-        <section class="workHero">
-          <div>
-            <span class="eyebrow">Сегодня</span>
-            <h2 id="todayShift">Смена не начата</h2>
-            <p id="todayLastAction">Нет последних действий</p>
-          </div>
-          <div class="heroActions">
-            <button id="mainShiftButton" class="primaryAction large" type="button">Начать смену</button>
-            <button id="finishShiftButton" class="ghost largeSecondary" type="button" hidden>
-              Завершить смену
+        <section id="myWorkView" class="view is-active" data-smoke="04_Moya_Rabota">
+          <div class="sectionTitle">
+            <h1>Пряник</h1>
+            <button id="loadTasksButton" type="button" class="linkButton" data-open-view="taskChoice">
+              Всего задач: 1
             </button>
           </div>
-          <div class="heroStats">
-            <div>
-              <span class="label">Задач</span>
-              <strong id="todayTasks">0</strong>
+
+          <div id="tasksList" class="taskList">
+            <article class="taskCard is-ready" data-open-view="taskDetail" data-home-task-card>
+              <div>
+                <div class="taskCardTitleRow">
+                  <h3>Подготовить основания стен для последующей обшивки ГКЛ.</h3>
+                </div>
+                <p>Пряник / Этаж 3 / Пом. 314</p>
+                <div class="taskCardProgressRow">
+                  <small>Прогресс 0%</small>
+                  <span class="homeTaskStatus is-ready" data-home-task-status>
+                    <span aria-hidden="true"></span>
+                    <b data-home-task-status-text>Взять в работу</b>
+                    <i data-home-task-status-icon>▶</i>
+                  </span>
+                </div>
+                <div class="progress"><i style="width: 0%"></i></div>
+              </div>
+            </article>
+          </div>
+
+          <section class="objectBlock">
+            <h2>Бауманка</h2>
+            <div class="emptyObject">
+              <span class="emptyBriefcase" aria-hidden="true"></span>
+              <p>Нет задач</p>
             </div>
-            <div>
-              <span class="label">Этап</span>
-              <strong id="todaySteps">0 активных</strong>
+          </section>
+
+          <section class="objectBlock">
+            <h2>Якиманка</h2>
+            <div class="emptyObject">
+              <span class="emptyBriefcase" aria-hidden="true"></span>
+              <p>Нет задач</p>
             </div>
+          </section>
+        </section>
+
+        <section id="taskChoiceView" class="view" data-smoke="05_Vybor_Zadachi">
+          <div class="pageHead">
+            <button type="button" class="iconOnly" data-open-view="myWork">‹</button>
+            <h1>Мои задачи</h1>
+            <button type="button" class="iconOnly">☰</button>
+          </div>
+          <article class="recommendedCard" data-open-view="taskDetail">
+            <span>Рекомендуемая</span>
+            <h2>Монтаж кабельных линий СПС</h2>
+            <p>Кабинет 301 · Система СПС</p>
+            <div class="progress"><i style="width: 40%"></i></div>
+            <div class="taskFacts">
+              <small class="dangerDot">Высокий</small>
+              <small>Сегодня, 18:00</small>
+              <small>2 ч 30 мин</small>
+            </div>
+            <button class="primaryButton" type="button" data-open-view="taskDetail">▷ Продолжить работу</button>
+          </article>
+          <h2 class="subhead">Другие задачи</h2>
+          <div class="miniTaskList">
+            <article><i class="orangeDot"></i><b>Установка датчиков дыма</b><span>Средний ›</span></article>
+            <article><i class="greenDot"></i><b>Подключение СКУД</b><span>Высокий ›</span></article>
+            <article><i class="blueDot"></i><b>Прокладка кабеля СКС</b><span>Низкий ›</span></article>
+            <article><i class="purpleDot"></i><b>Настройка видеонаблюдения</b><span>Средний ›</span></article>
           </div>
         </section>
 
-        <section id="taskScreen" class="workCard currentTaskCard" hidden>
-          <div class="cardHeader">
-            <span class="eyebrow">Текущая задача</span>
-            <button id="refreshAllButton" class="iconButton" type="button" aria-label="Обновить">
-              Обновить
+        <section id="taskDetailView" class="view" data-smoke="02_Otkrytaya_Zadacha">
+          <div class="pageHead taskStatusHead">
+            <button type="button" class="iconOnly" data-open-view="myWork">‹</button>
+            <button class="taskStatusControl is-ready" type="button" data-task-status-control>
+              <span>
+                <b data-task-status-text>Взять в работу</b>
+                <small data-task-status-caption>Задача ещё не начата.</small>
+              </span>
+              <i data-task-status-icon>▶</i>
             </button>
           </div>
-          <div class="taskLocation">
-            <span id="taskObject">Объект не указан</span>
-            <span id="taskRoom">Помещение не указано</span>
+          <article class="taskHero taskTitleBlock">
+            <h2 id="taskTitle">Подготовить основание стен для последующей обшивки ГКЛ.</h2>
+            <p id="taskObject">Пряник / Этаж 3 / Пом. 314</p>
+            <span id="taskMeta" hidden>Взять в работу</span>
+          </article>
+          <section class="photoSection" data-smoke="photo_examples">
+            <div class="photoCarousel" aria-label="Фотографии задачи">
+              <article class="photoSlide">
+                <img src="/assets/task-gallery-f03.jpg" alt="" />
+              </article>
+              <article class="photoSlide">
+                <img src="/assets/task-gallery-f04.jpg" alt="" />
+              </article>
+              <article class="photoSlide">
+                <img src="/assets/task-gallery-f05.jpg" alt="" />
+              </article>
+              <article class="photoSlide">
+                <img src="/assets/task-gallery-f06.jpg" alt="" />
+              </article>
+            </div>
+          </section>
+          <section class="whiteCard stepTimelineCard">
+            <div id="stepsList" class="stepTimeline">
+              <article class="stepTimelineCurrent is-current">
+                <span class="stepNumber">1</span>
+                <div class="currentStepBubble">
+                  <h3>Уборка помещения</h3>
+                  <p>Выбросить строительный мусор и посторонние предметы. Перенести весь инструмент в помещение 313. С инструментом обращаться аккуратно, не допускать повреждений и потерь.</p>
+                  <button type="button" data-complete-step>Завершить этап</button>
+                </div>
+              </article>
+              <article id="stepCableRow" class="stepTimelineFuture">
+                <span class="stageLock" aria-hidden="true"></span>
+                <div><h3>Кабели — стена А</h3></div>
+                <em>Ожидает</em>
+                <i aria-hidden="true">›</i>
+              </article>
+              <article id="stepMarkingRow" class="stepTimelineFuture">
+                <span class="stageLock" aria-hidden="true"></span>
+                <div><h3>Кабели — стена С</h3></div>
+                <em>Ожидает</em>
+                <i aria-hidden="true">›</i>
+              </article>
+              <article id="stepConnectRow" class="stepTimelineFuture">
+                <span class="stageLock" aria-hidden="true"></span>
+                <div><h3>Стекловата — стена А</h3></div>
+                <em>Ожидает</em>
+                <i aria-hidden="true">›</i>
+              </article>
+              <article id="stepTestRow" class="stepTimelineFuture">
+                <span class="stageLock" aria-hidden="true"></span>
+                <div><h3>Стекловата — стена В</h3></div>
+                <em>Ожидает</em>
+                <i aria-hidden="true">›</i>
+              </article>
+              <article class="stepTimelineFuture">
+                <span class="stageLock" aria-hidden="true"></span>
+                <div><h3>Передача помещения</h3></div>
+                <em>Ожидает</em>
+                <i aria-hidden="true">›</i>
+              </article>
+            </div>
+          </section>
+          <section class="whiteCard fileCard">
+            <h3>Файлы</h3>
+            <article class="fileItem">
+              <span class="pdfIcon">PDF</span>
+              <strong>Кабельные_линии_СС.pdf</strong>
+            </article>
+            <article class="fileItem">
+              <span class="pdfIcon">PDF</span>
+              <strong>Кабельные_линии_ЭОМ.pdf</strong>
+            </article>
+          </section>
+          <button class="helpButton" type="button" data-open-modal="helpRequest">Нужна помощь?</button>
+        </section>
+
+        <section id="currentStepView" class="view" data-smoke="10_Tekushchiy_Etap">
+          <div class="pageHead taskStatusHead">
+            <button type="button" class="iconOnly" data-open-view="taskDetail">‹</button>
+            <button class="taskStatusControl is-ready" type="button" data-task-status-control>
+              <span>
+                <b data-task-status-text>Взять в работу</b>
+                <small data-task-status-caption>Задача ещё не начата.</small>
+              </span>
+              <i data-task-status-icon>▶</i>
+            </button>
           </div>
-          <h2 id="taskTitle">Задача не выбрана</h2>
-          <p id="taskDescription" class="description"></p>
-          <div class="taskStateRow">
-            <span id="taskMeta" class="statusBadge">Статус не загружен</span>
-            <span id="nextStepText" class="nextStep">Следующий шаг не определён</span>
+          <article class="taskHero compactHero taskTitleBlock">
+            <h2>Подготовить основание стен для последующей обшивки ГКЛ.</h2>
+            <p>Пряник / Этаж 3 / Пом. 314</p>
+          </article>
+
+          <section class="stepScaleCard">
+            <h2 id="currentStepScaleTitle">Этап 2 из 5</h2>
+            <div class="stepScale" aria-hidden="true">
+              <span class="done"></span>
+              <span class="current"></span>
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <p id="currentStepScaleText">2 из 5 этапов</p>
+            <div class="scaleLegend">
+              <span><i class="greenDot"></i>Выполнен</span>
+              <span><i class="orangeDot"></i>Текущий этап</span>
+              <span><i></i>Будущие этапы</span>
+            </div>
+          </section>
+
+          <section class="whiteCard currentStage">
+            <span>Текущий этап</span>
+            <div class="sectionTitle">
+              <h2 id="currentStepTitle">Прокладка кабеля</h2>
+              <em>Сейчас</em>
+            </div>
+            <p id="currentStepDescription">
+              Проложите кабель до коробки по трассе.
+            </p>
+            <div class="notice warning">Важно: не перегибайте кабель.</div>
+          </section>
+
+          <section class="photoSection">
+            <h3>Фото-пример</h3>
+            <div class="photoCarousel" aria-label="Фото-пример этапа">
+              <article class="photoSlide">
+                <div class="mockPhoto cables"></div>
+              </article>
+              <article class="photoSlide">
+                <div class="mockPhoto tray"></div>
+              </article>
+              <article class="photoSlide">
+                <div class="mockPhoto box"></div>
+              </article>
+            </div>
+          </section>
+
+          <div class="stepActionStack">
+            <button class="primaryButton" type="button" data-complete-step>▧ Сделал этап</button>
+          </div>
+
+        </section>
+
+        <section id="stagePhotoView" class="view" data-smoke="stage_photo">
+          <div class="pageHead stagePhotoHead">
+            <button type="button" class="iconOnly" data-open-view="currentStep">‹</button>
+            <h1>Фото результата</h1>
+            <button type="button" class="iconOnly">•••</button>
+          </div>
+          <div class="stagePhotoBody">
+            <section class="whiteCard resultIntro stagePhotoIntro">
+              <h2 id="stagePhotoTitle">Фото результата</h2>
+              <p id="stagePhotoText">Сделайте фото результата. После фото этап будет выполнен.</p>
+            </section>
+            <div class="photoCarousel resultCarousel" aria-label="Фото результата этапа">
+              <article class="photoSlide cameraSlide">
+                <div class="cameraPreview">
+                  <b>▧</b>
+                  <strong>Камера готова</strong>
+                </div>
+              </article>
+              <article class="photoSlide">
+                <div class="mockPhoto tray"></div>
+              </article>
+            </div>
+          </div>
+          <div class="stagePhotoAction">
+            <button class="primaryButton" type="button" data-take-stage-photo>Сделать фото</button>
           </div>
         </section>
 
-        <section class="workCard">
-          <div class="cardHeader">
-            <span class="eyebrow">Этапы</span>
+        <section id="resultConfirmationView" class="view" data-smoke="result_confirmation">
+          <div class="pageHead">
+            <button type="button" class="iconOnly" data-open-view="taskDetail">‹</button>
+            <h1>Подтверждение результата</h1>
+            <button type="button" class="iconOnly">•••</button>
           </div>
-          <div id="stepsList" class="stepsList empty">Этапы ещё не загружены.</div>
+          <section class="whiteCard resultIntro">
+            <h2>Подтверждение результата</h2>
+            <p>Финальное фото готово. Отправьте задачу руководителю.</p>
+          </section>
+
+          <section class="photoSection">
+            <div class="photoCarousel resultCarousel" aria-label="Финальное фото результата">
+              <article class="photoSlide">
+                <button id="afterPhotoPlaceholder" class="photoPlaceholder" type="button" data-add-after-photo>
+                  <b>▧</b>
+                  <strong>Добавить фото</strong>
+                </button>
+                <div id="afterPhotoMock" class="mockPhoto tray" hidden></div>
+              </article>
+              <article class="photoSlide">
+                <div class="mockPhoto box"></div>
+              </article>
+            </div>
+          </section>
+
+          <div class="stepActionStack">
+            <button id="sendToManagerButton" class="primaryButton" type="button" data-send-to-manager disabled>
+              Отправить руководителю
+            </button>
+          </div>
         </section>
 
-        <section id="photoBlock" class="workCard photoCard">
-          <div>
-            <span class="eyebrow">Фотофиксация</span>
-            <h2>Фото результата</h2>
-            <p id="photoHint">Завершите этап, чтобы добавить фото.</p>
+        <section id="workSentView" class="view" data-smoke="work_sent">
+          <div class="centerResult">
+            <div class="modalIcon success">✓</div>
+            <h1>Задача отправлена</h1>
+            <p>Задача отправлена руководителю.</p>
+            <span class="status orange">Ожидает проверки</span>
+            <button class="primaryButton" type="button" data-return-to-task-review>Вернуться к задаче</button>
           </div>
-          <label class="fileButton">
-            Добавить фото
-            <input id="photoInput" type="file" accept="image/jpeg,image/png,image/webp" />
-          </label>
         </section>
 
-        <section class="workCard queueCard">
-          <div class="cardHeader">
-            <span class="eyebrow">Очередь задач</span>
-            <button id="loadTasksButton" class="ghost small" type="button">Обновить</button>
-          </div>
-          <div id="tasksList" class="compactList empty">Задачи ещё не загружены.</div>
-          <button id="createDemoTaskButton" class="ghost small" type="button" hidden>
-            Создать демо-задачу
+        <nav class="bottomNav">
+          <button class="is-active" type="button" data-open-view="myWork">
+            <span class="navBriefcase" aria-hidden="true"></span><span>Задачи</span>
           </button>
-        </section>
-
-        <section class="workCard">
-          <div class="cardHeader">
-            <span class="eyebrow">История работы</span>
-            <button id="loadEventsButton" class="ghost small" type="button">Обновить</button>
-          </div>
-          <div id="eventsList" class="timeline empty">События ещё не загружены.</div>
-        </section>
+          <button type="button"><span class="navChat" aria-hidden="true"></span><span>Сообщения</span></button>
+          <button type="button" aria-label="Заказать"><span class="navOrder" aria-hidden="true"></span></button>
+          <button type="button"><span class="navArchive" aria-hidden="true"></span><span>Архив</span></button>
+          <button type="button" data-open-modal="finishShift">
+            <span class="navUser" aria-hidden="true"></span><span>Профиль</span>
+          </button>
+        </nav>
       </section>
 
-      <section id="messagePanel" class="message" hidden></section>
+      <div id="modalLayer" class="modalLayer" hidden>
+        <section id="startShiftModal" class="modalCard" data-smoke="03_Nachalo_Smeny">
+          <h2>Начать рабочую смену?</h2>
+          <p>Для открытия смены потребуется сделать фотографию.</p>
+          <div class="taskStatusConfirmActions">
+            <button class="secondaryButton" type="button" data-close-modal>Отмена</button>
+            <button class="primaryButton shiftConfirmButton" type="button" data-confirm-start-shift>
+              Продолжить
+            </button>
+          </div>
+        </section>
+
+        <section id="finishShiftModal" class="modalCard" data-smoke="09_Zavershenie_Smeny">
+          <h2>Закончить рабочую смену?</h2>
+          <p>Для завершения смены потребуется сделать фотографию.</p>
+          <div class="taskStatusConfirmActions">
+            <button class="secondaryButton" type="button" data-close-modal>Отмена</button>
+            <button class="primaryButton shiftConfirmButton" type="button" data-confirm-finish-shift>
+              Продолжить
+            </button>
+          </div>
+        </section>
+
+        <section id="shiftCameraModal" class="modalCard shiftCameraModal">
+          <h2 id="shiftCameraTitle">Фото перед началом смены</h2>
+          <p id="shiftCameraText">Расположите лицо в кадре и сделайте фотографию.</p>
+          <div class="cameraCaptureBox">
+            <video id="shiftCameraVideo" playsinline muted></video>
+            <img id="shiftCameraPreview" alt="" hidden />
+            <canvas id="shiftCameraCanvas" hidden></canvas>
+            <div id="shiftCameraState" class="cameraState">Открываем камеру...</div>
+          </div>
+          <small id="shiftCameraError" class="cameraError" hidden></small>
+          <div class="cameraActions">
+            <button id="shiftCameraCancelButton" class="secondaryButton" type="button" data-cancel-camera>
+              Отмена
+            </button>
+            <button id="shiftCameraRetakeButton" class="secondaryButton" type="button" data-retake-camera hidden>
+              Переснять
+            </button>
+            <button id="shiftCameraCaptureButton" class="primaryButton" type="button" data-capture-camera>
+              Сделать фото
+            </button>
+            <button id="shiftCameraConfirmButton" class="primaryButton" type="button" data-confirm-camera disabled hidden>
+              Подтвердить
+            </button>
+          </div>
+        </section>
+
+        <section id="taskStatusConfirmModal" class="modalCard taskStatusConfirmModal">
+          <div id="taskStatusConfirmIcon" class="modalIcon taskStatusConfirmIcon">▶</div>
+          <h2 id="taskStatusConfirmTitle">Начать выполнение задачи?</h2>
+          <p id="taskStatusConfirmText">Будет зафиксировано время начала выполнения.</p>
+          <div id="pauseReasonField" class="pauseReasonField" hidden>
+            <textarea id="pauseReasonInput" placeholder="Напишите причину..." data-pause-reason></textarea>
+            <small id="pauseReasonError" hidden>Укажите причину паузы</small>
+          </div>
+          <div class="taskStatusConfirmActions">
+            <button class="secondaryButton" type="button" data-cancel-task-status>Отмена</button>
+            <button id="taskStatusConfirmButton" class="primaryButton" type="button" data-confirm-task-status>Начать</button>
+          </div>
+        </section>
+
+        <section id="helpRequestModal" class="modalCard helpRequestModal">
+          <h2>Нужна помощь?</h2>
+          <p>Опишите возникшую проблему.</p>
+          <div class="pauseReasonField">
+            <textarea id="helpRequestInput" placeholder="Опишите ситуацию..." data-help-request></textarea>
+            <small id="helpRequestError" hidden>Опишите проблему</small>
+          </div>
+          <div class="taskStatusConfirmActions">
+            <button class="secondaryButton" type="button" data-cancel-help-request>Отмена</button>
+            <button class="primaryButton" type="button" data-send-help-request>Отправить сообщение</button>
+          </div>
+        </section>
+      </div>
+
+      <section id="messagePanel" class="toast" hidden></section>
     </main>
 
     <script src="/app.js"></script>

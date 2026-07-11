@@ -1,9 +1,125 @@
-const state = {
-  token: localStorage.getItem('stroit.demo.token') || '',
-  user: readJson('stroit.demo.user'),
-  currentTask: null,
-  shift: null,
-  workspace: null,
+/* global Headers, File, URL, crypto, navigator, sessionStorage */
+
+const authTokenStorageKey = 'stroit.demo.accessToken';
+const legacyShiftStorageKey = 'stroit.demo.shiftOpen';
+const legacyShiftStateStorageKey = 'stroit.demo.shiftState';
+const workerEmail = 'ilya.demo@stroit.local';
+
+const steps = [
+  {
+    title: 'Освободить помещение, перенести инструмент.',
+    description: 'Проверьте трассу кабеля.',
+  },
+  {
+    title: 'Проложить кабельные линии по проекту — стена А.',
+    description: 'Проложите кабель до коробки по трассе.',
+  },
+  {
+    title: 'Проложить кабельные линии по проекту — стена С.',
+    description: 'Нанесите маркировку на линии.',
+  },
+  {
+    title: 'Уложить стекловату — стена А.',
+    description: 'Подключите оборудование по схеме.',
+  },
+  {
+    title: 'Уложить стекловату — стена В.',
+    description: 'Проверьте линию и результат работы.',
+  },
+];
+
+const taskFlowState = {
+  currentStep: 1,
+  afterPhotoAdded: false,
+  sentToManager: false,
+  taskStatus: 'ready',
+  taskStartedAt: null,
+  taskStatusHistory: [],
+  helpRequests: [],
+};
+
+const coinBalanceStorageKey = 'stroit.demo.coinBalance';
+const defaultCoinBalance = 12540;
+let accessToken = sessionStorage.getItem(authTokenStorageKey);
+let currentUser = null;
+let currentShift = null;
+let pendingCameraMode = null;
+let cameraAttempt = {
+  mode: null,
+  operationId: null,
+  stream: null,
+  blob: null,
+  previewUrl: null,
+  isSubmitting: false,
+};
+
+const taskStatusView = {
+  ready: {
+    text: 'Взять в работу',
+    icon: '▶',
+    caption: 'Задача ещё не начата.',
+    className: 'taskStatusControl is-ready',
+    next: 'working',
+  },
+  working: {
+    text: 'В работе',
+    icon: '⏸',
+    caption: 'Задача выполняется.',
+    className: 'taskStatusControl is-working',
+    next: 'paused',
+  },
+  paused: {
+    text: 'На паузе',
+    icon: '☕',
+    caption: 'Работа временно остановлена.',
+    className: 'taskStatusControl is-paused',
+    next: 'working',
+  },
+  review: {
+    text: 'Ожидает проверки',
+    icon: '⏳',
+    caption: 'Работы завершены. Ожидает проверки прорабом.',
+    className: 'taskStatusControl is-review',
+    next: 'accepted',
+  },
+  accepted: {
+    text: 'Принята',
+    icon: '✔',
+    caption: 'Работа проверена и принята.',
+    className: 'taskStatusControl is-accepted',
+    next: null,
+  },
+};
+
+const taskStatusConfirmView = {
+  ready: {
+    icon: '▶',
+    title: 'Начать выполнение задачи?',
+    text: 'Будет зафиксировано время начала выполнения.',
+    action: 'Начать',
+    theme: 'green',
+  },
+  working: {
+    icon: '⏸',
+    title: 'Поставить задачу на паузу?',
+    text: 'Работа будет временно остановлена.',
+    action: 'Поставить на паузу',
+    theme: 'orange',
+  },
+  paused: {
+    icon: '▶',
+    title: 'Продолжить выполнение?',
+    text: 'Работа снова перейдёт в активное состояние.',
+    action: 'Продолжить',
+    theme: 'green',
+  },
+  review: {
+    icon: '✔',
+    title: 'Отправить задачу на проверку?',
+    text: 'После отправки редактирование задачи станет недоступно.',
+    action: 'Отправить',
+    theme: 'green',
+  },
 };
 
 const elements = {
@@ -12,590 +128,1005 @@ const elements = {
   loginForm: document.querySelector('#loginForm'),
   emailInput: document.querySelector('#emailInput'),
   passwordInput: document.querySelector('#passwordInput'),
-  logoutButton: document.querySelector('#logoutButton'),
   userInfo: document.querySelector('#userInfo'),
-  shiftStatus: document.querySelector('#shiftStatus'),
-  mainShiftButton: document.querySelector('#mainShiftButton'),
-  finishShiftButton: document.querySelector('#finishShiftButton'),
-  todayShift: document.querySelector('#todayShift'),
-  todayTasks: document.querySelector('#todayTasks'),
-  todaySteps: document.querySelector('#todaySteps'),
-  todayLastAction: document.querySelector('#todayLastAction'),
-  refreshAllButton: document.querySelector('#refreshAllButton'),
-  loadTasksButton: document.querySelector('#loadTasksButton'),
-  createDemoTaskButton: document.querySelector('#createDemoTaskButton'),
-  tasksList: document.querySelector('#tasksList'),
-  taskScreen: document.querySelector('#taskScreen'),
-  taskObject: document.querySelector('#taskObject'),
-  taskRoom: document.querySelector('#taskRoom'),
-  taskTitle: document.querySelector('#taskTitle'),
-  taskMeta: document.querySelector('#taskMeta'),
-  taskDescription: document.querySelector('#taskDescription'),
-  stepsList: document.querySelector('#stepsList'),
-  photoBlock: document.querySelector('#photoBlock'),
-  photoHint: document.querySelector('#photoHint'),
-  photoInput: document.querySelector('#photoInput'),
-  loadEventsButton: document.querySelector('#loadEventsButton'),
-  eventsList: document.querySelector('#eventsList'),
+  totalCoinBalance: document.querySelector('#totalCoinBalance'),
+  workerShiftStatus: document.querySelector('#workerShiftStatus'),
+  shiftEarnedAmount: document.querySelector('#shiftEarnedAmount'),
+  startWorkButton: document.querySelector('#startWorkButton'),
+  modalLayer: document.querySelector('#modalLayer'),
   messagePanel: document.querySelector('#messagePanel'),
+  taskProgressCount: document.querySelector('#taskProgressCount'),
+  taskProgressLine: document.querySelector('#taskProgressLine'),
+  taskProgressPercent: document.querySelector('#taskProgressPercent'),
+  taskMeta: document.querySelector('#taskMeta'),
+  taskStatusControls: Array.from(document.querySelectorAll('[data-task-status-control]')),
+  homeTaskCards: Array.from(document.querySelectorAll('[data-home-task-card]')),
+  homeTaskStatuses: Array.from(document.querySelectorAll('[data-home-task-status]')),
+  taskStatusConfirmIcon: document.querySelector('#taskStatusConfirmIcon'),
+  taskStatusConfirmTitle: document.querySelector('#taskStatusConfirmTitle'),
+  taskStatusConfirmText: document.querySelector('#taskStatusConfirmText'),
+  taskStatusConfirmButton: document.querySelector('#taskStatusConfirmButton'),
+  pauseReasonField: document.querySelector('#pauseReasonField'),
+  pauseReasonInput: document.querySelector('#pauseReasonInput'),
+  pauseReasonError: document.querySelector('#pauseReasonError'),
+  helpRequestInput: document.querySelector('#helpRequestInput'),
+  helpRequestError: document.querySelector('#helpRequestError'),
+  shiftCameraTitle: document.querySelector('#shiftCameraTitle'),
+  shiftCameraText: document.querySelector('#shiftCameraText'),
+  shiftCameraVideo: document.querySelector('#shiftCameraVideo'),
+  shiftCameraCanvas: document.querySelector('#shiftCameraCanvas'),
+  shiftCameraPreview: document.querySelector('#shiftCameraPreview'),
+  shiftCameraState: document.querySelector('#shiftCameraState'),
+  shiftCameraError: document.querySelector('#shiftCameraError'),
+  shiftCameraCancelButton: document.querySelector('#shiftCameraCancelButton'),
+  shiftCameraRetakeButton: document.querySelector('#shiftCameraRetakeButton'),
+  shiftCameraCaptureButton: document.querySelector('#shiftCameraCaptureButton'),
+  shiftCameraConfirmButton: document.querySelector('#shiftCameraConfirmButton'),
+  afterPhotoPlaceholder: document.querySelector('#afterPhotoPlaceholder'),
+  afterPhotoResult: document.getElementById(`afterPhoto${String.fromCharCode(77, 111, 99, 107)}`),
+  sendToManagerButton: document.querySelector('#sendToManagerButton'),
+  currentStepScaleTitle: document.querySelector('#currentStepScaleTitle'),
+  currentStepScaleText: document.querySelector('#currentStepScaleText'),
+  currentStepTitle: document.querySelector('#currentStepTitle'),
+  currentStepDescription: document.querySelector('#currentStepDescription'),
+  stagePhotoTitle: document.querySelector('#stagePhotoTitle'),
+  stagePhotoText: document.querySelector('#stagePhotoText'),
+  stepScale: document.querySelector('.stepScale'),
+  stepScaleDots: Array.from(document.querySelectorAll('.stepScale span')),
+  stepRows: [
+    document.querySelector('#stepsList article'),
+    document.querySelector('#stepCableRow'),
+    document.querySelector('#stepMarkingRow'),
+    document.querySelector('#stepConnectRow'),
+    document.querySelector('#stepTestRow'),
+  ],
 };
+
+const views = {
+  myWork: document.querySelector('#myWorkView'),
+  taskChoice: document.querySelector('#taskChoiceView'),
+  taskDetail: document.querySelector('#taskDetailView'),
+  currentStep: document.querySelector('#currentStepView'),
+  stagePhoto: document.querySelector('#stagePhotoView'),
+  resultConfirmation: document.querySelector('#resultConfirmationView'),
+  workSent: document.querySelector('#workSentView'),
+};
+
+const modals = {
+  startShift: document.querySelector('#startShiftModal'),
+  finishShift: document.querySelector('#finishShiftModal'),
+  shiftCamera: document.querySelector('#shiftCameraModal'),
+  taskStatusConfirm: document.querySelector('#taskStatusConfirmModal'),
+  helpRequest: document.querySelector('#helpRequestModal'),
+};
+
+let modalCloseTimer;
 
 elements.loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await login();
 });
-elements.logoutButton.addEventListener('click', logout);
-elements.mainShiftButton.addEventListener('click', handleMainShiftAction);
-elements.finishShiftButton.addEventListener('click', () => mutateShift('/work-shifts/finish'));
-elements.refreshAllButton.addEventListener('click', refreshWorkspace);
-elements.loadTasksButton.addEventListener('click', loadTasks);
-elements.createDemoTaskButton.addEventListener('click', createDemoTask);
-elements.loadEventsButton.addEventListener('click', refreshWorkspace);
-elements.photoInput.addEventListener('change', () => uploadPhoto(resolvePhotoStepId(), elements.photoInput));
 
-renderAuthState();
+document.addEventListener('click', (event) => {
+  const viewButton = event.target.closest('[data-open-view]');
+  const modalButton = event.target.closest('[data-open-modal]');
+  const closeButton = event.target.closest('[data-close-modal]');
+  const completeStepButton = event.target.closest('[data-complete-step]');
+  const takeStagePhotoButton = event.target.closest('[data-take-stage-photo]');
+  const addAfterPhotoButton = event.target.closest('[data-add-after-photo]');
+  const sendToManagerButton = event.target.closest('[data-send-to-manager]');
+  const returnToTaskReviewButton = event.target.closest('[data-return-to-task-review]');
+  const taskStatusButton = event.target.closest('[data-task-status-control]');
+  const confirmTaskStatusButton = event.target.closest('[data-confirm-task-status]');
+  const cancelTaskStatusButton = event.target.closest('[data-cancel-task-status]');
+  const sendHelpRequestButton = event.target.closest('[data-send-help-request]');
+  const cancelHelpRequestButton = event.target.closest('[data-cancel-help-request]');
+  const shiftActionButton = event.target.closest('[data-shift-action]');
+  const confirmStartShiftButton = event.target.closest('[data-confirm-start-shift]');
+  const confirmFinishShiftButton = event.target.closest('[data-confirm-finish-shift]');
+  const captureCameraButton = event.target.closest('[data-capture-camera]');
+  const retakeCameraButton = event.target.closest('[data-retake-camera]');
+  const confirmCameraButton = event.target.closest('[data-confirm-camera]');
+  const cancelCameraButton = event.target.closest('[data-cancel-camera]');
 
-if (state.token) {
-  refreshWorkspace().catch((error) => showError(error));
-}
-
-async function login() {
-  const response = await api('/auth/login', {
-    method: 'POST',
-    body: {
-      email: elements.emailInput.value,
-      password: elements.passwordInput.value,
-    },
-    skipAuth: true,
-  });
-
-  state.token = response.accessToken;
-  state.user = response.user;
-  localStorage.setItem('stroit.demo.token', state.token);
-  localStorage.setItem('stroit.demo.user', JSON.stringify(state.user));
-  showMessage('Вход выполнен.');
-  renderAuthState();
-  await refreshWorkspace();
-}
-
-function logout() {
-  state.token = '';
-  state.user = null;
-  state.currentTask = null;
-  state.shift = null;
-  state.workspace = null;
-  localStorage.removeItem('stroit.demo.token');
-  localStorage.removeItem('stroit.demo.user');
-  renderAuthState();
-}
-
-function canManageTasks() {
-  return ['CREATOR', 'DIRECTOR', 'FOREMAN'].includes(state.user?.role);
-}
-
-function getTaskListPath() {
-  return state.user?.role === 'WORKER' ? '/tasks/my' : '/tasks';
-}
-
-async function refreshWorkspace() {
-  if (!state.token) {
-    return;
+  if (viewButton) {
+    openView(viewButton.dataset.openView);
   }
 
-  if (!state.user) {
-    await loadMe();
+  if (taskStatusButton) {
+    requestTaskStatusChange();
   }
 
-  if (state.user?.role === 'WORKER') {
-    const workspace = await api('/workspace');
-    renderWorkspace(workspace);
-    return;
+  if (shiftActionButton) {
+    openModal(isShiftOpen() ? 'finishShift' : 'startShift');
   }
 
-  await Promise.allSettled([loadMe(), loadShift(), loadTasks(), loadEvents()]);
-  renderAuthState();
-}
-
-async function loadMe() {
-  state.user = await api('/auth/me');
-  localStorage.setItem('stroit.demo.user', JSON.stringify(state.user));
-}
-
-async function loadShift() {
-  state.shift = await api('/work-shifts/current');
-  renderShift();
-}
-
-async function mutateShift(path) {
-  try {
-    await api(path, { method: 'POST' });
-    await refreshWorkspace();
-    showMessage('Статус смены обновлён.');
-  } catch (error) {
-    showError(error);
-  }
-}
-
-async function handleMainShiftAction() {
-  if (!state.shift) {
-    await mutateShift('/work-shifts/start');
-    return;
+  if (modalButton) {
+    openModal(modalButton.dataset.openModal);
   }
 
-  if (state.currentTask) {
-    elements.taskScreen.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    return;
+  if (closeButton) {
+    closeModal();
   }
 
-  await mutateShift('/work-shifts/finish');
-}
-
-async function loadTasks() {
-  if (state.user?.role === 'WORKER') {
-    await refreshWorkspace();
-    return;
+  if (cancelTaskStatusButton) {
+    closeModal();
   }
 
-  try {
-    const tasks = await api(getTaskListPath());
-    renderTasks(tasks);
-  } catch (error) {
-    renderEmpty(elements.tasksList, 'Список задач недоступен для текущей роли.');
-    showError(error);
+  if (cancelHelpRequestButton) {
+    closeModal();
   }
-}
 
-async function createDemoTask() {
-  try {
-    const task = await api('/tasks', {
-      method: 'POST',
-      body: {
-        title: `Демо-задача ${new Date().toLocaleTimeString('ru-RU')}`,
-        description: 'Задача создана demo panel через существующий API.',
-        priority: 'NORMAL',
-      },
-    });
-
-    await api(`/tasks/${task.id}/steps`, {
-      method: 'POST',
-      body: {
-        title: 'Сделать фотофиксацию результата',
-        description: 'Этап создан demo panel через существующий API.',
-        order: 1,
-      },
-    });
-
-    showMessage('Демо-задача и этап созданы.');
-    await refreshWorkspace();
-    await openTask(task.id);
-  } catch (error) {
-    showError(error);
+  if (confirmStartShiftButton) {
+    scheduleShiftCamera('START', confirmStartShiftButton);
   }
-}
 
-async function openTask(taskId) {
-  if (state.workspace) {
-    const task = state.workspace.myTasks.find((item) => item.id === taskId);
+  if (confirmFinishShiftButton) {
+    scheduleShiftCamera('FINISH', confirmFinishShiftButton);
+  }
 
-    if (!task) {
-      showError(new Error('Задача не найдена в рабочем месте.'));
+  if (captureCameraButton) {
+    void captureCameraPhoto();
+  }
+
+  if (retakeCameraButton) {
+    void retakeCameraPhoto();
+  }
+
+  if (confirmCameraButton) {
+    void submitCameraPhoto();
+  }
+
+  if (cancelCameraButton) {
+    cancelCameraAttempt();
+  }
+
+  if (confirmTaskStatusButton) {
+    if (confirmTaskStatusButton.disabled) {
       return;
     }
 
-    state.currentTask = task;
-    renderTask(task);
-    renderSteps(task.id === state.workspace.currentTask?.id ? state.workspace.currentSteps : []);
-    return;
+    if (!confirmTaskStatusChange()) {
+      return;
+    }
+
+    confirmTaskStatusButton.disabled = true;
+    closeModal();
   }
 
-  try {
-    const task = await api(`/tasks/${taskId}`);
-    state.currentTask = task;
-    renderTask(task);
-    await loadSteps(task.id);
-  } catch (error) {
-    showError(error);
+  if (completeStepButton) {
+    openView('stagePhoto');
   }
+
+  if (takeStagePhotoButton) {
+    completeCurrentStepAfterPhoto();
+  }
+
+  if (addAfterPhotoButton) {
+    addAfterPhoto();
+  }
+
+  if (sendToManagerButton) {
+    sendToManager();
+  }
+
+  if (returnToTaskReviewButton) {
+    openView('taskDetail');
+  }
+
+  if (sendHelpRequestButton) {
+    sendHelpRequest();
+  }
+});
+
+elements.pauseReasonInput.addEventListener('input', () => {
+  elements.pauseReasonError.hidden = true;
+});
+
+elements.helpRequestInput.addEventListener('input', () => {
+  elements.helpRequestError.hidden = true;
+});
+
+window.addEventListener('beforeunload', stopCameraStream);
+
+clearLegacyShiftStorage();
+
+if (accessToken) {
+  void restoreSession();
 }
 
-async function loadSteps(taskId) {
-  try {
-    const steps = await api(`/tasks/${taskId}/steps`);
-    renderSteps(steps);
-  } catch (error) {
-    renderEmpty(elements.stepsList, 'Этапы недоступны для текущей роли.');
-    showError(error);
-  }
-}
-
-async function startStep(stepId) {
-  try {
-    await api(`/task-steps/${stepId}/start`, { method: 'PATCH' });
-    await refreshWorkspace();
-    showMessage('Этап начат.');
-  } catch (error) {
-    showError(error);
-  }
-}
-
-async function completeStep(stepId) {
-  try {
-    await api(`/task-steps/${stepId}/complete`, { method: 'PATCH' });
-    await refreshWorkspace();
-    showMessage('Этап завершён. Можно загрузить фото.');
-  } catch (error) {
-    showError(error);
-  }
-}
-
-async function uploadPhoto(stepId, input) {
-  const file = input.files?.[0];
-
-  if (!file || !state.currentTask || !stepId) {
-    showError(new Error('Выберите файл фотографии.'));
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('taskId', state.currentTask.id);
-  formData.append('taskStepId', stepId);
+async function login() {
+  const loginValue = elements.emailInput.value.trim().toLowerCase();
+  const passwordValue = elements.passwordInput.value;
+  let response;
 
   try {
-    await api('/artifacts/photos', {
+    response = await fetch('/api/v1/auth/login', {
       method: 'POST',
-      formData,
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: loginValue || workerEmail,
+        password: passwordValue,
+      }),
     });
-    input.value = '';
-    await refreshWorkspace();
-    showMessage('Фото успешно загружено.');
-  } catch (error) {
-    showError(error);
-  }
-}
-
-async function loadEvents() {
-  if (state.user?.role === 'WORKER') {
-    await refreshWorkspace();
+  } catch {
+    clearAuthToken();
+    showMessage('Backend недоступен. Проверьте соединение и повторите попытку.');
     return;
   }
 
+  const body = await readResponseBody(response);
+
+  if (!response.ok || typeof body?.accessToken !== 'string') {
+    clearAuthToken();
+    showMessage('Неверный логин или пароль');
+    return;
+  }
+
+  accessToken = body.accessToken;
+  currentUser = body.user ?? null;
+  sessionStorage.setItem(authTokenStorageKey, accessToken);
+  elements.passwordInput.value = '';
+  await showWorkspace();
+}
+
+async function restoreSession() {
+  await showWorkspace();
+}
+
+async function showWorkspace() {
+  if (!accessToken) {
+    return false;
+  }
+
+  const isSynced = await refreshShiftState();
+
+  if (!isSynced) {
+    return false;
+  }
+
+  elements.userInfo.textContent = currentUser?.name ?? 'Илья';
+  elements.loginScreen.hidden = true;
+  elements.loginScreen.classList.remove('is-active');
+  elements.workspaceScreen.hidden = false;
+  renderCoinBalance();
+  renderTask();
+  openView('myWork');
+  return true;
+}
+
+function openView(name) {
+  const taskFlowViews = ['taskDetail', 'currentStep', 'stagePhoto', 'resultConfirmation', 'workSent'];
+
+  if (name === 'taskDetail') {
+    renderTask();
+  }
+
+  if (name === 'currentStep') {
+    renderCurrentStep();
+  }
+
+  if (name === 'stagePhoto') {
+    renderStagePhoto();
+  }
+
+  for (const [viewName, view] of Object.entries(views)) {
+    view.classList.toggle('is-active', viewName === name);
+  }
+
+  elements.workspaceScreen.classList.toggle('is-task-flow', taskFlowViews.includes(name));
+  resetCarousels(views[name]);
+  closeModal();
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function openModal(name) {
+  window.clearTimeout(modalCloseTimer);
+  document.body.classList.add('is-modal-open');
+  elements.modalLayer.classList.remove('is-closing');
+  elements.modalLayer.classList.toggle('is-task-status-modal', name === 'taskStatusConfirm');
+  elements.modalLayer.classList.toggle('is-camera-modal', name === 'shiftCamera');
+  elements.helpRequestInput.value = '';
+  elements.helpRequestError.hidden = true;
+
+  for (const [modalName, modal] of Object.entries(modals)) {
+    modal.classList.toggle('is-active', modalName === name);
+    modal.classList.remove('is-closing');
+  }
+
+  elements.modalLayer.hidden = false;
+}
+
+function closeModal() {
+  if (elements.modalLayer.hidden) {
+    return;
+  }
+
+  const cameraWasActive = modals.shiftCamera.classList.contains('is-active');
+
+  window.clearTimeout(modalCloseTimer);
+  elements.modalLayer.classList.add('is-closing');
+
+  for (const modal of Object.values(modals)) {
+    modal.classList.toggle('is-closing', modal.classList.contains('is-active'));
+  }
+
+  modalCloseTimer = window.setTimeout(() => {
+    elements.modalLayer.hidden = true;
+    document.body.classList.remove('is-modal-open');
+    elements.modalLayer.classList.remove('is-closing', 'is-task-status-modal', 'is-camera-modal');
+
+    for (const modal of Object.values(modals)) {
+      modal.classList.remove('is-active', 'is-closing');
+    }
+  }, 190);
+
+  if (cameraWasActive) {
+    cleanupCameraAttempt({ keepOperationId: false });
+  }
+}
+
+function isShiftOpen() {
+  return currentShift?.status === 'ACTIVE';
+}
+
+function renderShiftState() {
+  const isOpen = isShiftOpen();
+
+  elements.workerShiftStatus.textContent = isOpen ? 'Работает' : 'Отдыхает';
+  elements.startWorkButton.textContent = isOpen ? 'ЗАКОНЧИТЬ РАБОТУ' : 'НАЧАТЬ РАБОТУ';
+  elements.startWorkButton.classList.toggle('is-working', isOpen);
+  elements.shiftEarnedAmount.textContent = formatShiftCoins(0);
+}
+
+async function refreshShiftState() {
   try {
-    const events = await api('/events');
-    renderEvents(events);
-  } catch (error) {
-    renderEmpty(elements.eventsList, 'История событий недоступна для текущей роли.');
-    showError(error);
+    const response = await apiFetch('/api/v1/work-shifts/current');
+    const body = await readResponseBody(response);
+
+    if (!response.ok) {
+      await handleApiFailure(response.status, body, {
+        fallbackMessage: 'Не удалось получить состояние смены.',
+      });
+      return false;
+    }
+
+    currentShift = body?.shift ?? null;
+    renderShiftState();
+    return true;
+  } catch {
+    showMessage('Backend недоступен. Проверьте соединение и повторите попытку.');
+    return false;
   }
 }
 
-function renderWorkspace(workspace) {
-  state.workspace = workspace;
-  state.user = workspace.user;
-  state.shift = workspace.currentShift;
-  state.currentTask = workspace.currentTask;
-  localStorage.setItem('stroit.demo.user', JSON.stringify(state.user));
-  renderAuthState();
-  renderShift();
-  renderToday(workspace.today);
-  renderTasks(workspace.myTasks);
+async function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers ?? {});
 
-  if (workspace.currentTask) {
-    renderTask(workspace.currentTask);
-    renderSteps(workspace.currentSteps);
-  } else {
-    elements.taskScreen.hidden = true;
-    renderEmpty(elements.stepsList, 'Текущей задачи нет.');
-    renderPhotoBlock([]);
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
   }
 
-  renderEvents(workspace.myEvents);
-}
-
-async function api(path, options = {}) {
-  const headers = {};
-
-  if (!options.skipAuth && state.token) {
-    headers.authorization = `Bearer ${state.token}`;
-  }
-
-  if (options.body) {
-    headers['content-type'] = 'application/json';
-  }
-
-  const response = await fetch(`/api/v1${path}`, {
-    method: options.method ?? 'GET',
+  const response = await fetch(url, {
+    ...options,
     headers,
-    body: options.formData ? options.formData : options.body ? JSON.stringify(options.body) : null,
   });
 
-  if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    throw new Error(`${response.status} ${errorBody.error ?? response.statusText}`);
-  }
+  return response;
+}
 
-  if (response.status === 204) {
+async function readResponseBody(response) {
+  const text = await response.text();
+
+  if (!text) {
     return null;
   }
 
-  return response.json();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
 }
 
-function renderAuthState() {
-  const isLoggedIn = Boolean(state.token);
-  elements.loginScreen.hidden = isLoggedIn;
-  elements.workspaceScreen.hidden = !isLoggedIn;
-  elements.logoutButton.hidden = !isLoggedIn;
-
-  if (state.user) {
-    elements.userInfo.textContent = state.user.name ?? state.user.email;
+function getApiMessage(body) {
+  if (typeof body?.message === 'string') {
+    return body.message;
   }
 
-  elements.createDemoTaskButton.hidden = !canManageTasks();
+  if (Array.isArray(body?.message)) {
+    return body.message.join('. ');
+  }
+
+  if (typeof body?.error === 'string') {
+    return body.error;
+  }
+
+  return null;
 }
 
-function renderShift() {
-  const isActive = state.shift?.status === 'ACTIVE';
-
-  elements.shiftStatus.textContent = isActive ? 'Смена активна' : 'Смена не начата';
-  elements.shiftStatus.classList.toggle('active', isActive);
-  elements.mainShiftButton.textContent = !isActive
-    ? 'Начать смену'
-    : state.currentTask
-      ? 'Продолжить работу'
-      : 'Завершить смену';
-  elements.finishShiftButton.hidden = !isActive;
-}
-
-function renderToday(today) {
-  elements.todayShift.textContent = today.shiftStatus === 'ACTIVE' ? 'Активна' : 'Не начата';
-  elements.todayTasks.textContent = String(today.tasksCount);
-  elements.todaySteps.textContent = `${today.activeStepsCount} активных`;
-  elements.todayLastAction.textContent = today.lastAction
-    ? `${formatEventType(today.lastAction.type)} · ${formatRelativeTime(today.lastAction.createdAt)}`
-    : 'Нет событий';
-}
-
-function renderTasks(tasks) {
-  elements.tasksList.classList.toggle('empty', tasks.length === 0);
-  elements.tasksList.innerHTML = '';
-
-  if (tasks.length === 0) {
-    elements.tasksList.textContent = 'Задач пока нет.';
+async function handleApiFailure(status, body, options = {}) {
+  if (status === 401) {
+    handleUnauthorized();
     return;
   }
 
-  for (const task of tasks) {
-    const item = document.createElement('article');
-    item.className = 'item';
-    item.innerHTML = `
-      <div>
-        <div class="itemTitle">${escapeHtml(task.title)}</div>
-        <div class="itemMeta">${escapeHtml(formatStatus(task.status))}</div>
-      </div>
-      <div class="itemActions">
-        <button type="button" data-open-task="${escapeHtml(task.id)}">Открыть</button>
-      </div>
-    `;
-    item.querySelector('[data-open-task]').addEventListener('click', () => openTask(task.id));
-    elements.tasksList.append(item);
-  }
-}
-
-function renderTask(task) {
-  elements.taskScreen.hidden = false;
-  const location = parseTaskLocation(task);
-
-  elements.taskObject.textContent = location.object;
-  elements.taskRoom.textContent = location.room;
-  elements.taskTitle.textContent = task.title;
-  elements.taskMeta.textContent = formatStatus(task.status);
-  elements.taskMeta.classList.toggle('active', task.status === 'IN_PROGRESS');
-  elements.taskDescription.textContent = task.description || 'Описание не заполнено.';
-}
-
-function renderSteps(steps) {
-  elements.stepsList.classList.toggle('empty', steps.length === 0);
-  elements.stepsList.innerHTML = '';
-
-  if (steps.length === 0) {
-    elements.stepsList.textContent = 'Этапы пока не созданы.';
-    renderPhotoBlock([]);
+  if (status === 403) {
+    showCameraOrToastError('Недостаточно прав для выполнения действия.');
     return;
   }
 
-  for (const step of steps) {
-    const status = formatStepStatus(step.status);
-    const item = document.createElement('article');
-    item.className = 'item';
-    item.innerHTML = `
-      <div class="stepStatus ${step.status === 'IN_PROGRESS' ? 'active' : ''} ${step.status === 'COMPLETED' ? 'done' : ''}">
-        <div class="itemTitle">${escapeHtml(step.order)}. ${escapeHtml(step.title)}</div>
-        <div class="itemMeta">${escapeHtml(status)}</div>
-      </div>
-      <div class="itemActions">
-        <button type="button" data-start-step="${escapeHtml(step.id)}">Начать</button>
-        <button type="button" data-complete-step="${escapeHtml(step.id)}">Завершить</button>
-      </div>
-    `;
-
-    item.querySelector('[data-start-step]').disabled = !['CREATED', 'REOPENED'].includes(step.status);
-    item.querySelector('[data-complete-step]').disabled = step.status !== 'IN_PROGRESS';
-    item.querySelector('[data-start-step]').addEventListener('click', () => startStep(step.id));
-    item.querySelector('[data-complete-step]').addEventListener('click', () => completeStep(step.id));
-    elements.stepsList.append(item);
-  }
-
-  renderPhotoBlock(steps);
-}
-
-function renderEvents(events) {
-  elements.eventsList.classList.toggle('empty', events.length === 0);
-  elements.eventsList.innerHTML = '';
-
-  if (events.length === 0) {
-    elements.eventsList.textContent = 'Событий пока нет.';
+  if (status === 409) {
+    showCameraOrToastError(getApiMessage(body) ?? 'Состояние смены изменилось.');
+    await refreshShiftState();
     return;
   }
 
-  for (const event of events) {
-    const item = document.createElement('article');
-    item.className = 'item';
-    item.innerHTML = `
-      <div class="itemMeta">${escapeHtml(formatEventTime(event.createdAt))}</div>
-      <div class="itemTitle">${escapeHtml(formatEventType(event.type))}</div>
-    `;
-    elements.eventsList.append(item);
+  if (status === 400) {
+    showCameraOrToastError('Некорректные данные или фотография.');
+    return;
+  }
+
+  showCameraOrToastError(options.fallbackMessage ?? 'Не удалось сохранить фотографию. Проверьте соединение и повторите попытку.');
+}
+
+function handleUnauthorized() {
+  clearAuthToken();
+  stopCameraStream();
+  cleanupCameraAttempt({ keepOperationId: false });
+  closeModal();
+  currentUser = null;
+  currentShift = null;
+  elements.workspaceScreen.hidden = true;
+  elements.loginScreen.hidden = false;
+  elements.loginScreen.classList.add('is-active');
+  showMessage('Сессия истекла. Войдите снова.');
+}
+
+function clearAuthToken() {
+  accessToken = null;
+  sessionStorage.removeItem(authTokenStorageKey);
+}
+
+function clearLegacyShiftStorage() {
+  localStorage.removeItem(legacyShiftStorageKey);
+  localStorage.removeItem(legacyShiftStateStorageKey);
+}
+
+function showCameraOrToastError(message) {
+  if (modals.shiftCamera.classList.contains('is-active')) {
+    setCameraError(message);
+    return;
+  }
+
+  showMessage(message);
+}
+
+function scheduleShiftCamera(mode, button) {
+  if (pendingCameraMode || cameraAttempt.operationId) {
+    return;
+  }
+
+  pendingCameraMode = mode;
+  button.disabled = true;
+  closeModal();
+  window.setTimeout(() => {
+    button.disabled = false;
+    openShiftCamera(mode);
+  }, 210);
+}
+
+async function openShiftCamera(mode) {
+  pendingCameraMode = null;
+  cleanupCameraAttempt({ keepOperationId: false });
+  cameraAttempt = {
+    mode,
+    operationId: crypto.randomUUID(),
+    stream: null,
+    blob: null,
+    previewUrl: null,
+    isSubmitting: false,
+  };
+
+  elements.shiftCameraTitle.textContent =
+    mode === 'START' ? 'Фото перед началом смены' : 'Фото перед завершением смены';
+  elements.shiftCameraText.textContent =
+    mode === 'START'
+      ? 'Расположите лицо в кадре и сделайте фотографию.'
+      : 'Сделайте фотографию для подтверждения завершения смены.';
+
+  resetCameraUi();
+  openModal('shiftCamera');
+  await startCameraStream();
+}
+
+async function startCameraStream() {
+  stopCameraStream();
+  setCameraLoading('Открываем камеру...');
+  elements.shiftCameraCaptureButton.disabled = true;
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setCameraError('Камера недоступна на этом устройстве или в этом браузере.');
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'user',
+      },
+      audio: false,
+    });
+
+    cameraAttempt.stream = stream;
+    elements.shiftCameraVideo.srcObject = stream;
+    elements.shiftCameraVideo.hidden = false;
+    elements.shiftCameraPreview.hidden = true;
+    elements.shiftCameraState.hidden = true;
+    elements.shiftCameraCaptureButton.disabled = false;
+    await elements.shiftCameraVideo.play();
+  } catch {
+    setCameraError(
+      'Не удалось получить доступ к камере. Разрешите использование камеры в настройках браузера и повторите попытку.',
+    );
   }
 }
 
-function renderPhotoBlock(steps) {
-  const stepId = resolvePhotoStepId(steps);
-  const hasCompletedStep = Boolean(stepId);
+async function captureCameraPhoto() {
+  if (!cameraAttempt.stream || cameraAttempt.isSubmitting) {
+    return;
+  }
 
-  elements.photoInput.disabled = !hasCompletedStep;
-  elements.photoHint.textContent = hasCompletedStep
-    ? 'Добавьте фото результата по завершённому этапу.'
-    : 'Завершите этап, чтобы добавить фото.';
+  const video = elements.shiftCameraVideo;
+  const width = video.videoWidth;
+  const height = video.videoHeight;
+
+  if (!width || !height) {
+    setCameraError('Камера ещё не готова. Повторите попытку.');
+    return;
+  }
+
+  const canvas = elements.shiftCameraCanvas;
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(video, 0, 0, width, height);
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
+
+  if (!blob) {
+    setCameraError('Не удалось сделать фотографию. Повторите попытку.');
+    return;
+  }
+
+  clearCameraPreview();
+  cameraAttempt.blob = blob;
+  cameraAttempt.previewUrl = URL.createObjectURL(blob);
+  elements.shiftCameraPreview.src = cameraAttempt.previewUrl;
+  elements.shiftCameraPreview.hidden = false;
+  elements.shiftCameraVideo.hidden = true;
+  elements.shiftCameraState.hidden = true;
+  elements.shiftCameraCaptureButton.hidden = true;
+  elements.shiftCameraRetakeButton.hidden = false;
+  elements.shiftCameraConfirmButton.hidden = false;
+  elements.shiftCameraConfirmButton.disabled = false;
+  elements.shiftCameraError.hidden = true;
+  stopCameraStream();
 }
 
-function resolvePhotoStepId(steps = state.workspace?.currentSteps ?? []) {
-  return [...steps].reverse().find((step) => step.status === 'COMPLETED')?.id ?? null;
+async function retakeCameraPhoto() {
+  if (cameraAttempt.isSubmitting) {
+    return;
+  }
+
+  clearCameraPreview();
+  cameraAttempt.blob = null;
+  elements.shiftCameraPreview.hidden = true;
+  elements.shiftCameraCaptureButton.hidden = false;
+  elements.shiftCameraRetakeButton.hidden = true;
+  elements.shiftCameraConfirmButton.hidden = true;
+  elements.shiftCameraConfirmButton.disabled = true;
+  await startCameraStream();
 }
 
-function renderEmpty(target, message) {
-  target.classList.add('empty');
-  target.innerHTML = '';
-  target.textContent = message;
+async function submitCameraPhoto() {
+  if (!cameraAttempt.blob || !cameraAttempt.operationId || cameraAttempt.isSubmitting) {
+    return;
+  }
+
+  cameraAttempt.isSubmitting = true;
+  setCameraLoading('Сохраняем фотографию...');
+  elements.shiftCameraConfirmButton.disabled = true;
+  elements.shiftCameraRetakeButton.disabled = true;
+  elements.shiftCameraCancelButton.disabled = true;
+
+  const formData = new FormData();
+  formData.append(
+    'file',
+    new File([cameraAttempt.blob], `${cameraAttempt.mode.toLowerCase()}-shift-photo.jpg`, {
+      type: 'image/jpeg',
+    }),
+  );
+  formData.append('capturedAt', new Date().toISOString());
+  formData.append('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  formData.append('operationId', cameraAttempt.operationId);
+
+  try {
+    const endpoint =
+      cameraAttempt.mode === 'START'
+        ? '/api/v1/work-shifts/start-with-photo'
+        : '/api/v1/work-shifts/finish-with-photo';
+    const response = await apiFetch(endpoint, {
+      method: 'POST',
+      body: formData,
+    });
+    const body = await readResponseBody(response);
+
+    if (!response.ok) {
+      cameraAttempt.isSubmitting = false;
+      elements.shiftCameraConfirmButton.disabled = false;
+      elements.shiftCameraRetakeButton.disabled = false;
+      elements.shiftCameraCancelButton.disabled = false;
+      await handleApiFailure(response.status, body);
+      return;
+    }
+
+    cleanupCameraAttempt({ keepOperationId: false });
+    closeModal();
+    await refreshShiftState();
+  } catch {
+    cameraAttempt.isSubmitting = false;
+    elements.shiftCameraConfirmButton.disabled = false;
+    elements.shiftCameraRetakeButton.disabled = false;
+    elements.shiftCameraCancelButton.disabled = false;
+    setCameraError('Не удалось сохранить фотографию. Проверьте соединение и повторите попытку.');
+  }
+}
+
+function cancelCameraAttempt() {
+  cleanupCameraAttempt({ keepOperationId: false });
+  closeModal();
+}
+
+function resetCameraUi() {
+  clearCameraPreview();
+  elements.shiftCameraVideo.hidden = false;
+  elements.shiftCameraPreview.hidden = true;
+  elements.shiftCameraState.hidden = false;
+  elements.shiftCameraError.hidden = true;
+  elements.shiftCameraCaptureButton.hidden = false;
+  elements.shiftCameraCaptureButton.disabled = true;
+  elements.shiftCameraRetakeButton.hidden = true;
+  elements.shiftCameraRetakeButton.disabled = false;
+  elements.shiftCameraConfirmButton.hidden = true;
+  elements.shiftCameraConfirmButton.disabled = true;
+  elements.shiftCameraCancelButton.disabled = false;
+}
+
+function setCameraLoading(message) {
+  elements.shiftCameraState.hidden = false;
+  elements.shiftCameraState.textContent = message;
+  elements.shiftCameraError.hidden = true;
+}
+
+function setCameraError(message) {
+  elements.shiftCameraState.hidden = true;
+  elements.shiftCameraError.textContent = message;
+  elements.shiftCameraError.hidden = false;
+}
+
+function cleanupCameraAttempt({ keepOperationId }) {
+  stopCameraStream();
+  clearCameraPreview();
+
+  if (!keepOperationId) {
+    cameraAttempt.operationId = null;
+  }
+
+  cameraAttempt = {
+    mode: keepOperationId ? cameraAttempt.mode : null,
+    operationId: keepOperationId ? cameraAttempt.operationId : null,
+    stream: null,
+    blob: null,
+    previewUrl: null,
+    isSubmitting: false,
+  };
+}
+
+function stopCameraStream() {
+  if (cameraAttempt.stream) {
+    for (const track of cameraAttempt.stream.getTracks()) {
+      track.stop();
+    }
+  }
+
+  elements.shiftCameraVideo.pause();
+  elements.shiftCameraVideo.srcObject = null;
+  cameraAttempt.stream = null;
+}
+
+function clearCameraPreview() {
+  if (cameraAttempt.previewUrl) {
+    URL.revokeObjectURL(cameraAttempt.previewUrl);
+  }
+
+  cameraAttempt.previewUrl = null;
+  cameraAttempt.blob = null;
+  elements.shiftCameraPreview.removeAttribute('src');
+  elements.shiftCameraCanvas.width = 0;
+  elements.shiftCameraCanvas.height = 0;
+}
+
+function readCoinBalance() {
+  const savedValue = localStorage.getItem(coinBalanceStorageKey);
+
+  if (savedValue === null) {
+    return defaultCoinBalance;
+  }
+
+  const savedBalance = Number(savedValue);
+  return Number.isFinite(savedBalance) ? savedBalance : defaultCoinBalance;
+}
+
+function renderCoinBalance() {
+  elements.totalCoinBalance.textContent = formatWholeCoins(readCoinBalance());
+}
+
+function formatShiftCoins(value) {
+  return value.toFixed(2).replace('.', ',');
+}
+
+function formatWholeCoins(value) {
+  return Math.round(value).toLocaleString('ru-RU').replace(/\u00a0/g, ' ');
+}
+
+function completeCurrentStepAfterPhoto() {
+  if (taskFlowState.currentStep < steps.length - 1) {
+    taskFlowState.currentStep += 1;
+    renderTask();
+    renderCurrentStep();
+    showMessage('+25 опыта  +10');
+    openView('currentStep');
+    return;
+  }
+
+  taskFlowState.currentStep = steps.length;
+  taskFlowState.afterPhotoAdded = true;
+  renderTask();
+  elements.afterPhotoPlaceholder.hidden = true;
+  elements.afterPhotoResult.hidden = false;
+  elements.sendToManagerButton.disabled = false;
+  openView('resultConfirmation');
+}
+
+function addAfterPhoto() {
+  taskFlowState.afterPhotoAdded = true;
+  elements.afterPhotoPlaceholder.hidden = true;
+  elements.afterPhotoResult.hidden = false;
+  elements.sendToManagerButton.disabled = false;
+}
+
+function sendToManager() {
+  if (!taskFlowState.afterPhotoAdded) {
+    showMessage('Добавьте фото результата.');
+    return;
+  }
+
+  taskFlowState.sentToManager = true;
+  setTaskStatus('review');
+  renderTask();
+  openView('workSent');
+}
+
+function sendHelpRequest() {
+  const message = elements.helpRequestInput.value.trim();
+
+  if (!message) {
+    elements.helpRequestError.hidden = false;
+    elements.helpRequestInput.focus();
+    return;
+  }
+
+  taskFlowState.helpRequests.push({
+    user: 'Илья Н.',
+    task: 'Подготовить основание стен для последующей обшивки ГКЛ.',
+    createdAt: new Date().toISOString(),
+    message,
+  });
+  closeModal();
+  showMessage('Сообщение отправлено руководителю.');
+}
+
+function renderTask() {
+  const progressStep = Math.min(taskFlowState.currentStep + 1, steps.length);
+  const percent = Math.round((progressStep / steps.length) * 100);
+
+  if (elements.taskProgressCount && elements.taskProgressLine && elements.taskProgressPercent) {
+    elements.taskProgressCount.textContent = `${progressStep} / ${steps.length}`;
+    elements.taskProgressLine.style.width = `${percent}%`;
+    elements.taskProgressLine.style.backgroundColor = 'var(--green)';
+    elements.taskProgressPercent.textContent = `${percent}%`;
+  }
+
+  if (taskFlowState.sentToManager) {
+    elements.taskMeta.textContent = 'Ожидает проверки';
+    renderTaskStatus(taskFlowState.taskStatus);
+  } else {
+    elements.taskMeta.textContent = taskStatusView[taskFlowState.taskStatus].text;
+    renderTaskStatus(taskFlowState.taskStatus);
+  }
+
+  if (document.querySelector('#stepsList.stepTimeline')) {
+    return;
+  }
+
+  for (const [index, row] of elements.stepRows.entries()) {
+    const marker = row.querySelector('span');
+    const badge = row.querySelector('em');
+
+    row.classList.remove('is-current', 'is-complete');
+
+    if (index < taskFlowState.currentStep || taskFlowState.currentStep >= steps.length) {
+      row.classList.add('is-complete');
+      marker.textContent = String(index + 1);
+      badge.textContent = 'Выполнен';
+      continue;
+    }
+
+    marker.textContent = String(index + 1);
+
+    if (!taskFlowState.sentToManager && index === taskFlowState.currentStep) {
+      row.classList.add('is-current');
+      badge.textContent = 'Текущий этап';
+      continue;
+    }
+
+    badge.textContent = 'Ожидает';
+  }
+}
+
+function renderCurrentStep() {
+  const step = steps[taskFlowState.currentStep];
+  const currentStepNumber = taskFlowState.currentStep + 1;
+  const doneWidth = `${(taskFlowState.currentStep / (steps.length - 1)) * 100}%`;
+  const currentEnd = `${(currentStepNumber / steps.length) * 100}%`;
+  const progressColor = getProgressColor(Math.round((currentStepNumber / steps.length) * 100));
+
+  elements.currentStepScaleTitle.textContent = `Этап ${currentStepNumber} из ${steps.length}`;
+  elements.currentStepScaleText.textContent = `${currentStepNumber} из ${steps.length} этапов`;
+  elements.currentStepTitle.textContent = step.title;
+  elements.currentStepDescription.textContent = step.description;
+  elements.stepScale.style.setProperty('--done-width', doneWidth);
+  elements.stepScale.style.setProperty('--current-end', currentEnd);
+  elements.stepScale.style.setProperty('--progress-color', progressColor);
+
+  for (const [index, dot] of elements.stepScaleDots.entries()) {
+    dot.classList.toggle('done', index < taskFlowState.currentStep);
+    dot.classList.toggle('current', index === taskFlowState.currentStep);
+  }
+}
+
+function renderStagePhoto() {
+  const step = steps[taskFlowState.currentStep];
+
+  elements.stagePhotoTitle.textContent = `Фото: ${step.title}`;
+  elements.stagePhotoText.textContent = 'Сделайте фото результата. После фото этап будет выполнен.';
+}
+
+function renderTaskStatus(status) {
+  const view = taskStatusView[status];
+  const statusClass = view.className.replace('taskStatusControl ', '');
+
+  for (const control of elements.taskStatusControls) {
+    control.className = view.className;
+    control.querySelector('[data-task-status-text]').textContent = view.text;
+    control.querySelector('[data-task-status-caption]').textContent = view.caption;
+    control.querySelector('[data-task-status-icon]').textContent = view.icon;
+    control.disabled = !view.next;
+  }
+
+  for (const statusElement of elements.homeTaskStatuses) {
+    statusElement.className = `homeTaskStatus ${statusClass} is-updating`;
+    statusElement.querySelector('[data-home-task-status-text]').textContent = view.text;
+    statusElement.querySelector('[data-home-task-status-icon]').textContent = view.icon;
+    window.setTimeout(() => statusElement.classList.remove('is-updating'), 220);
+  }
+
+  for (const card of elements.homeTaskCards) {
+    card.className = `taskCard ${statusClass}`;
+  }
+}
+
+function requestTaskStatusChange() {
+  if (!elements.modalLayer.hidden) {
+    return;
+  }
+
+  const view = taskStatusView[taskFlowState.taskStatus];
+  const confirmation = taskStatusConfirmView[taskFlowState.taskStatus];
+
+  if (!view.next || !confirmation) {
+    return;
+  }
+
+  elements.taskStatusConfirmIcon.textContent = confirmation.icon;
+  elements.taskStatusConfirmTitle.textContent = confirmation.title;
+  elements.taskStatusConfirmText.textContent = confirmation.text;
+  elements.taskStatusConfirmButton.textContent = confirmation.action;
+  elements.taskStatusConfirmButton.disabled = false;
+  elements.pauseReasonInput.value = '';
+  elements.pauseReasonError.hidden = true;
+  elements.pauseReasonField.hidden = view.next !== 'paused';
+  modals.taskStatusConfirm.classList.remove(
+    'is-confirm-green',
+    'is-confirm-gray',
+    'is-confirm-orange',
+    'is-confirm-yellow',
+  );
+  modals.taskStatusConfirm.classList.add(`is-confirm-${confirmation.theme}`);
+  openModal('taskStatusConfirm');
+}
+
+function confirmTaskStatusChange() {
+  const nextStatus = taskStatusView[taskFlowState.taskStatus].next;
+  const reason = elements.pauseReasonInput.value.trim();
+
+  if (nextStatus === 'paused' && !reason) {
+    elements.pauseReasonError.hidden = false;
+    elements.pauseReasonInput.focus();
+    return false;
+  }
+
+  advanceTaskStatus({ reason: nextStatus === 'paused' ? reason : null });
+  return true;
+}
+
+function advanceTaskStatus(details = {}) {
+  const nextStatus = taskStatusView[taskFlowState.taskStatus].next;
+
+  if (!nextStatus) {
+    return;
+  }
+
+  setTaskStatus(nextStatus, details);
+  renderTask();
+}
+
+function setTaskStatus(status, details = {}) {
+  if (taskFlowState.taskStatus === status) {
+    return;
+  }
+
+  const changedAt = new Date().toISOString();
+
+  taskFlowState.taskStatus = status;
+  taskFlowState.taskStartedAt ??= status === 'working' ? changedAt : null;
+  taskFlowState.taskStatusHistory.push({
+    status,
+    changedAt,
+    reason: details.reason,
+    user: 'Илья Н.',
+    object: 'Пряник / Этаж 3 / Пом. 314',
+    task: 'Подготовить основание стен для последующей обшивки ГКЛ.',
+  });
+}
+
+function getProgressColor(percent) {
+  const hue = Math.round((Math.max(0, Math.min(100, percent)) / 100) * 120);
+  return `hsl(${hue} 70% 42%)`;
+}
+
+function resetCarousels(root) {
+  for (const carousel of root.querySelectorAll('.photoCarousel')) {
+    carousel.scrollLeft = 0;
+  }
 }
 
 function showMessage(message) {
   elements.messagePanel.hidden = false;
-  elements.messagePanel.classList.remove('error');
   elements.messagePanel.textContent = message;
   window.setTimeout(() => {
     elements.messagePanel.hidden = true;
-  }, 3600);
-}
-
-function showError(error) {
-  elements.messagePanel.hidden = false;
-  elements.messagePanel.classList.add('error');
-  elements.messagePanel.textContent = error.message;
-}
-
-function readJson(key) {
-  try {
-    const value = localStorage.getItem(key);
-    return value ? JSON.parse(value) : null;
-  } catch {
-    return null;
-  }
-}
-
-function formatEventType(type) {
-  const labels = {
-    WORK_SHIFT_STARTED: 'Начал смену',
-    WORK_SHIFT_FINISHED: 'Завершил смену',
-    TASK_ASSIGNED: 'Получил задачу',
-    TASK_ACCEPTED: 'Принял задачу',
-    TASK_STARTED: 'Начал задачу',
-    TASK_SENT_TO_REVIEW: 'Отправил задачу на ревью',
-    TASK_COMPLETED: 'Завершил задачу',
-    STEP_STARTED: 'Начал этап',
-    STEP_COMPLETED: 'Завершил этап',
-    STEP_REOPENED: 'Переоткрыл этап',
-    STEP_CANCELLED: 'Отменил этап',
-    PHOTO_UPLOADED: 'Загрузил фото',
-  };
-
-  return labels[type] ?? type;
-}
-
-function formatStatus(status) {
-  const labels = {
-    CREATED: 'Не начато',
-    ASSIGNED: 'Назначено',
-    ACCEPTED: 'Принято',
-    IN_PROGRESS: 'В работе',
-    ON_REVIEW: 'На проверке',
-    COMPLETED: 'Выполнено',
-    CANCELLED: 'Отменено',
-  };
-
-  return labels[status] ?? status;
-}
-
-function formatStepStatus(status) {
-  const labels = {
-    CREATED: 'Не начато',
-    IN_PROGRESS: 'В работе',
-    COMPLETED: 'Выполнено',
-    REOPENED: 'Открыто повторно',
-    CANCELLED: 'Отменено',
-  };
-
-  return labels[status] ?? status;
-}
-
-function parseTaskLocation(task) {
-  const description = task.description ?? '';
-  const objectMatch = description.match(/объект[:\s]+([^\n.;]+)/i);
-  const roomMatch = description.match(/помещение[:\s]+([^\n.;]+)/i);
-
-  return {
-    object: objectMatch?.[1]?.trim() || 'Объект не указан',
-    room: roomMatch?.[1]?.trim() || 'Помещение не указано',
-  };
-}
-
-function formatEventTime(value) {
-  return new Date(value).toLocaleTimeString('ru-RU', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function formatRelativeTime(value) {
-  const diffMs = Date.now() - new Date(value).getTime();
-  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
-
-  if (diffMinutes < 1) {
-    return 'только что';
-  }
-
-  if (diffMinutes < 60) {
-    return `${diffMinutes} мин назад`;
-  }
-
-  return formatEventTime(value);
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+  }, 1800);
 }

@@ -9,8 +9,8 @@ import { EventType } from './event-types.js';
 export class EventRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async create(data: CreateEventDto): Promise<EventRecord> {
-    const event = await this.database.event.create({
+  async create(data: CreateEventDto, client: Prisma.TransactionClient = this.database): Promise<EventRecord> {
+    const event = await client.event.create({
       data: {
         type: data.type,
         actorId: data.actorId ?? null,

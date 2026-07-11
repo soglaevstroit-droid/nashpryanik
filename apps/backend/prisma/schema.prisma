@@ -124,6 +124,15 @@ enum ArtifactType {
   PHOTO
 }
 
+enum WorkShiftPhotoType {
+  START
+  FINISH
+}
+
+enum ArtifactSource {
+  DIRECT_CAMERA_CAPTURE
+}
+
 model Event {
   id         String    @id @default(uuid())
   type       EventType
@@ -182,6 +191,7 @@ model WorkShift {
   finishedAt DateTime?
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
+  photos     WorkShiftPhoto[]
 
   @@index([userId])
   @@index([status])
@@ -243,6 +253,7 @@ model Artifact {
   mimeType         String
   fileSize         Int
   createdAt        DateTime     @default(now())
+  workShiftPhoto   WorkShiftPhoto?
 
   @@index([type])
   @@index([eventId])
@@ -251,4 +262,29 @@ model Artifact {
   @@index([uploadedBy])
   @@index([createdAt])
   @@map("artifacts")
+}
+
+model WorkShiftPhoto {
+  id          String             @id @default(uuid())
+  workShiftId String
+  artifactId  String             @unique
+  type        WorkShiftPhotoType
+  capturedAt  DateTime
+  receivedAt  DateTime           @default(now())
+  source      ArtifactSource
+  timezone    String
+  width       Int
+  height      Int
+  operationId String             @unique
+  createdAt   DateTime           @default(now())
+
+  workShift WorkShift @relation(fields: [workShiftId], references: [id], onDelete: Cascade)
+  artifact  Artifact  @relation(fields: [artifactId], references: [id], onDelete: Restrict)
+
+  @@unique([workShiftId, type])
+  @@index([workShiftId])
+  @@index([artifactId])
+  @@index([type])
+  @@index([capturedAt])
+  @@map("work_shift_photos")
 }

@@ -12,7 +12,8 @@
     "prisma:generate": "node --env-file=../../.env node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
     "prisma:migrate": "node --env-file=../../.env node_modules/prisma/build/index.js migrate dev --schema prisma/schema.prisma",
     "prisma:studio": "node --env-file=../../.env node_modules/prisma/build/index.js studio --schema prisma/schema.prisma",
-    "db:check": "npm run build && node dist/database/check-database.js"
+    "db:check": "npm run build && node dist/database/check-database.js",
+    "bootstrap:demo-worker": "npm run build && node --env-file=../../.env dist/database/bootstrap-demo-worker.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",

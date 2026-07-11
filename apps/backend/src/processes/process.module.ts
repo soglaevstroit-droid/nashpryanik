@@ -13,6 +13,6 @@ import { ProcessService } from './process.service.js';
   imports: [AppConfigModule, DatabaseModule, EventModule],
   controllers: [ProcessController],
   providers: [ProcessRepository, ProcessService, JwtService, JwtAuthGuard, RolesGuard],
-  exports: [ProcessService],
+  exports: [ProcessRepository, ProcessService],
 })
 export class ProcessModule {}

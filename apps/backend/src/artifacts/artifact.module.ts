@@ -21,5 +21,6 @@ import { ArtifactService } from './artifact.service.js';
     JwtAuthGuard,
     RolesGuard,
   ],
+  exports: [ArtifactService],
 })
 export class ArtifactModule {}

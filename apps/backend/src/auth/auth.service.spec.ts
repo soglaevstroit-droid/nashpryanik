@@ -12,6 +12,7 @@ import { TaskStepController } from '../task-steps/task-step.controller.js';
 import { TaskController } from '../tasks/task.controller.js';
 import { UserRecord } from '../users/user-record.js';
 import { UserService } from '../users/user.service.js';
+import { WorkShiftController } from '../work-shifts/work-shift.controller.js';
 import { WorkspaceController } from '../workspace/workspace.controller.js';
 import { AuthRequest } from './auth-user.js';
 import { AuthService } from './auth.service.js';
@@ -389,6 +390,56 @@ test('workspace controller allows worker and rejects finance or partner', () => 
   );
   assert.throws(
     () => guard.canActivate(createHttpContext(createRequest('PARTNER'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('deprecated work shift start rejects worker and allows director', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = WorkShiftController.prototype.startShift as () => unknown;
+  const controller = WorkShiftController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('DIRECTOR'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('deprecated work shift finish rejects worker and allows creator', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = WorkShiftController.prototype.finishShift as () => unknown;
+  const controller = WorkShiftController;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('CREATOR'), handler, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('WORKER'), handler, controller)),
+    /Forbidden/,
+  );
+});
+
+test('work shift photo endpoints allow worker and reject finance', () => {
+  const guard = new RolesGuard(new Reflector());
+  const controller = WorkShiftController;
+  const startWithPhoto = WorkShiftController.prototype.startShiftWithPhoto as () => unknown;
+  const finishWithPhoto = WorkShiftController.prototype.finishShiftWithPhoto as () => unknown;
+
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('WORKER'), startWithPhoto, controller)),
+    true,
+  );
+  assert.equal(
+    guard.canActivate(createHttpContext(createRequest('WORKER'), finishWithPhoto, controller)),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(createHttpContext(createRequest('FINANCE'), startWithPhoto, controller)),
     /Forbidden/,
   );
 });

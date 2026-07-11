@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { WorkShift, WorkShiftStatus } from '@prisma/client';
+import { Prisma, WorkShift, WorkShiftStatus } from '@prisma/client';
 import { DatabaseService } from '../database/database.service.js';
 import { WorkShiftRecord } from './work-shift-record.js';
 
@@ -8,12 +8,14 @@ export class WorkShiftRepository {
   constructor(private readonly database: DatabaseService) {}
 
   async create(data: {
+    id?: string;
     userId: string;
     processId: string;
     startedAt: Date;
-  }): Promise<WorkShiftRecord> {
-    const shift = await this.database.workShift.create({
+  }, client: Prisma.TransactionClient = this.database): Promise<WorkShiftRecord> {
+    const shift = await client.workShift.create({
       data: {
+        id: data.id,
         userId: data.userId,
         processId: data.processId,
         status: 'ACTIVE',
@@ -24,8 +26,11 @@ export class WorkShiftRepository {
     return this.toRecord(shift);
   }
 
-  async findActiveByUserId(userId: string): Promise<WorkShiftRecord | null> {
-    const shift = await this.database.workShift.findFirst({
+  async findActiveByUserId(
+    userId: string,
+    client: Prisma.TransactionClient = this.database,
+  ): Promise<WorkShiftRecord | null> {
+    const shift = await client.workShift.findFirst({
       where: {
         userId,
         status: 'ACTIVE',
@@ -38,8 +43,11 @@ export class WorkShiftRepository {
     return shift ? this.toRecord(shift) : null;
   }
 
-  async findById(id: string): Promise<WorkShiftRecord | null> {
-    const shift = await this.database.workShift.findUnique({
+  async findById(
+    id: string,
+    client: Prisma.TransactionClient = this.database,
+  ): Promise<WorkShiftRecord | null> {
+    const shift = await client.workShift.findUnique({
       where: {
         id,
       },
@@ -48,8 +56,12 @@ export class WorkShiftRepository {
     return shift ? this.toRecord(shift) : null;
   }
 
-  async finish(id: string, finishedAt: Date): Promise<WorkShiftRecord> {
-    const shift = await this.database.workShift.update({
+  async finish(
+    id: string,
+    finishedAt: Date,
+    client: Prisma.TransactionClient = this.database,
+  ): Promise<WorkShiftRecord> {
+    const shift = await client.workShift.update({
       where: {
         id,
       },

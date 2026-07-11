@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { ArtifactType } from '@prisma/client';
+import { ArtifactType, Prisma } from '@prisma/client';
 import { DatabaseService } from '../database/database.service.js';
 import { ArtifactRecord } from './artifact-record.js';
 
 interface CreateArtifactData {
+  id?: string;
   type: ArtifactType;
   eventId: string;
   taskId?: string | null;
@@ -19,8 +20,11 @@ interface CreateArtifactData {
 export class ArtifactRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  create(data: CreateArtifactData): Promise<ArtifactRecord> {
-    return this.database.artifact.create({
+  create(
+    data: CreateArtifactData,
+    client: Prisma.TransactionClient = this.database,
+  ): Promise<ArtifactRecord> {
+    return client.artifact.create({
       data,
     });
   }

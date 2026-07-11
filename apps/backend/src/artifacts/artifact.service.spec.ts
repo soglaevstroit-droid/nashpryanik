@@ -19,11 +19,17 @@ const user: AuthUser = {
 };
 
 function createFile(overrides: Partial<UploadedArtifactFile> = {}): UploadedArtifactFile {
+  const buffer = Buffer.from([
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00,
+    0x10, 0x00, 0x20, 0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11,
+    0x00, 0xff, 0xd9,
+  ]);
+
   return {
-    buffer: Buffer.from('photo-bytes'),
+    buffer,
     originalname: 'progress.jpg',
     mimetype: 'image/jpeg',
-    size: 11,
+    size: buffer.length,
     ...overrides,
   };
 }
@@ -192,7 +198,7 @@ test('deletes photo from storage and database', async () => {
   assert.deepEqual(storageEvents, ['delete:photos/worker-1/2026-07-09/photo.jpg']);
 });
 
-test('rejects unsupported MIME type', async () => {
+test('rejects unsupported image content', async () => {
   const service = new ArtifactService(
     createRepository(),
     createStorage([]),
@@ -205,7 +211,8 @@ test('rejects unsupported MIME type', async () => {
         user,
         {},
         createFile({
-          mimetype: 'application/pdf',
+          buffer: Buffer.from('not-image'),
+          size: 9,
         }),
       ),
     BadRequestException,

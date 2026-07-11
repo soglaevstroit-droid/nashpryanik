@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth-user.js';
 import { EventService } from '../events/event.service.js';
 import { UploadPhotoDto } from './dto/upload-photo.dto.js';
@@ -8,8 +9,29 @@ import { ArtifactStorageService } from './artifact-storage.service.js';
 import { UploadedArtifactFile } from './uploaded-artifact-file.js';
 
 const maxPhotoFileSizeBytes = 10 * 1024 * 1024;
-const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/webp']);
 const defaultArtifactListLimit = 100;
+
+export interface PhotoInspection {
+  mimeType: string;
+  width: number;
+  height: number;
+  fileSize: number;
+  extension: string;
+}
+
+export interface UploadedPhotoObject {
+  storageKey: string;
+  file: UploadedArtifactFile;
+  inspection: PhotoInspection;
+}
+
+interface CreatePhotoArtifactRecordOptions {
+  artifactId?: string;
+  eventEntityId?: string;
+  eventPayload?: Record<string, unknown>;
+  eventMetadata?: Record<string, unknown>;
+}
 
 @Injectable()
 export class ArtifactService {
@@ -26,16 +48,62 @@ export class ArtifactService {
   ): Promise<ArtifactRecord> {
     assertAuthUser(user);
     assertUploadPhotoDto(dto);
-    assertPhotoFile(file);
-
-    const storageKey = this.storage.generatePhotoStorageKey(user.id, file.originalname);
-    await this.storage.uploadPhoto(storageKey, file);
+    const uploaded = await this.uploadPhotoObject(user, file);
 
     try {
-      const event = await this.events.createEvent({
+      return await this.createPhotoArtifactRecord(user, dto, uploaded);
+    } catch (error) {
+      await this.deleteStoredPhoto(uploaded.storageKey);
+      throw error;
+    }
+  }
+
+  inspectPhotoFile(file: UploadedArtifactFile): PhotoInspection {
+    return inspectPhotoFile(file);
+  }
+
+  async uploadPhotoObject(user: AuthUser, file: UploadedArtifactFile): Promise<UploadedPhotoObject> {
+    const uploaded = this.preparePhotoObject(user, file);
+    await this.storePreparedPhoto(uploaded);
+
+    return uploaded;
+  }
+
+  preparePhotoObject(user: AuthUser, file: UploadedArtifactFile): UploadedPhotoObject {
+    assertAuthUser(user);
+    const inspection = this.inspectPhotoFile(file);
+    const normalizedFile = normalizeUploadedPhotoFile(file, inspection);
+    const storageKey = this.storage.generatePhotoStorageKey(user.id, normalizedFile.originalname);
+
+    return {
+      storageKey,
+      file: normalizedFile,
+      inspection,
+    };
+  }
+
+  async storePreparedPhoto(uploaded: UploadedPhotoObject): Promise<void> {
+    await this.storage.uploadPhoto(uploaded.storageKey, uploaded.file);
+  }
+
+  async createPhotoArtifactRecord(
+    user: AuthUser,
+    dto: UploadPhotoDto,
+    uploaded: UploadedPhotoObject,
+    client?: Prisma.TransactionClient,
+    options: CreatePhotoArtifactRecordOptions = {},
+  ): Promise<ArtifactRecord> {
+    assertAuthUser(user);
+    assertUploadPhotoDto(dto);
+
+    const { file, storageKey } = uploaded;
+
+    const event = await this.events.createEvent(
+      {
         type: 'PHOTO_UPLOADED',
         actorId: user.id,
         entityType: 'artifact',
+        entityId: options.eventEntityId ?? null,
         payload: {
           artifactType: 'PHOTO',
           taskId: dto.taskId ?? null,
@@ -44,13 +112,19 @@ export class ArtifactService {
           mimeType: file.mimetype,
           fileSize: file.size,
           storageKey,
+          ...options.eventPayload,
         },
         metadata: {
           source: 'artifact-foundation',
+          ...options.eventMetadata,
         },
-      });
+      },
+      client,
+    );
 
-      return await this.repository.create({
+    return this.repository.create(
+      {
+        id: options.artifactId,
         type: 'PHOTO',
         eventId: event.id,
         taskId: dto.taskId ?? null,
@@ -60,11 +134,15 @@ export class ArtifactService {
         originalFileName: file.originalname,
         mimeType: file.mimetype,
         fileSize: file.size,
-      });
-    } catch (error) {
-      await this.storage.deleteObject(storageKey).catch(() => undefined);
-      throw error;
-    }
+      },
+      client,
+    );
+  }
+
+  async deleteStoredPhoto(storageKey: string): Promise<void> {
+    await this.storage.deleteObject(storageKey).catch((error: unknown) => {
+      console.error('Failed to delete orphan photo object', { storageKey, error });
+    });
   }
 
   async getPhoto(id: string): Promise<ArtifactDownload> {
@@ -123,7 +201,7 @@ function assertUploadPhotoDto(dto: UploadPhotoDto): void {
   assertNullableString(dto.taskStepId, 'taskStepId');
 }
 
-function assertPhotoFile(file: UploadedArtifactFile): void {
+function inspectPhotoFile(file: UploadedArtifactFile): PhotoInspection {
   if (!file?.buffer || !file.originalname || !file.mimetype) {
     throw new BadRequestException('Photo file is required');
   }
@@ -132,8 +210,180 @@ function assertPhotoFile(file: UploadedArtifactFile): void {
     throw new BadRequestException('Photo file size is invalid');
   }
 
-  if (!allowedPhotoMimeTypes.has(file.mimetype)) {
+  const inspection = inspectImageBuffer(file.buffer);
+
+  if (!allowedPhotoMimeTypes.has(inspection.mimeType)) {
     throw new BadRequestException('Photo MIME type is not supported');
+  }
+
+  return {
+    ...inspection,
+    fileSize: file.size,
+  };
+}
+
+function normalizeUploadedPhotoFile(
+  file: UploadedArtifactFile,
+  inspection: PhotoInspection,
+): UploadedArtifactFile {
+  return {
+    ...file,
+    originalname: normalizePhotoFileName(file.originalname, inspection.extension),
+    mimetype: inspection.mimeType,
+    size: file.size,
+  };
+}
+
+function normalizePhotoFileName(fileName: string, extension: string): string {
+  const trimmedName = fileName.trim() || 'photo';
+  const baseName = trimmedName.replace(/\.[^.]+$/, '');
+
+  return `${baseName}.${extension}`;
+}
+
+function inspectImageBuffer(buffer: Buffer): Omit<PhotoInspection, 'fileSize'> {
+  const jpeg = inspectJpegBuffer(buffer);
+
+  if (jpeg) {
+    return jpeg;
+  }
+
+  const webp = inspectWebpBuffer(buffer);
+
+  if (webp) {
+    return webp;
+  }
+
+  throw new BadRequestException('Photo file is not a supported image');
+}
+
+function inspectJpegBuffer(buffer: Buffer): Omit<PhotoInspection, 'fileSize'> | null {
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
+    return null;
+  }
+
+  let offset = 2;
+
+  while (offset + 9 < buffer.length) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = buffer[offset + 1];
+    offset += 2;
+
+    if (marker === 0xd9 || marker === 0xda) {
+      break;
+    }
+
+    if (offset + 2 > buffer.length) {
+      break;
+    }
+
+    const segmentLength = buffer.readUInt16BE(offset);
+
+    if (segmentLength < 2 || offset + segmentLength > buffer.length) {
+      throw new BadRequestException('Photo JPEG structure is invalid');
+    }
+
+    if (isJpegStartOfFrame(marker)) {
+      if (segmentLength < 7) {
+        throw new BadRequestException('Photo JPEG dimensions are invalid');
+      }
+
+      const height = buffer.readUInt16BE(offset + 3);
+      const width = buffer.readUInt16BE(offset + 5);
+
+      assertImageDimensions(width, height);
+
+      return {
+        mimeType: 'image/jpeg',
+        width,
+        height,
+        extension: 'jpg',
+      };
+    }
+
+    offset += segmentLength;
+  }
+
+  throw new BadRequestException('Photo JPEG dimensions were not found');
+}
+
+function isJpegStartOfFrame(marker: number): boolean {
+  return (
+    marker >= 0xc0 &&
+    marker <= 0xcf &&
+    ![0xc4, 0xc8, 0xcc].includes(marker)
+  );
+}
+
+function inspectWebpBuffer(buffer: Buffer): Omit<PhotoInspection, 'fileSize'> | null {
+  if (
+    buffer.length < 30 ||
+    buffer.toString('ascii', 0, 4) !== 'RIFF' ||
+    buffer.toString('ascii', 8, 12) !== 'WEBP'
+  ) {
+    return null;
+  }
+
+  const chunkType = buffer.toString('ascii', 12, 16);
+
+  if (chunkType === 'VP8X') {
+    const width = 1 + buffer.readUIntLE(24, 3);
+    const height = 1 + buffer.readUIntLE(27, 3);
+    assertImageDimensions(width, height);
+
+    return {
+      mimeType: 'image/webp',
+      width,
+      height,
+      extension: 'webp',
+    };
+  }
+
+  if (chunkType === 'VP8 ') {
+    if (buffer.length < 30 || buffer[23] !== 0x9d || buffer[24] !== 0x01 || buffer[25] !== 0x2a) {
+      throw new BadRequestException('Photo WebP structure is invalid');
+    }
+
+    const width = buffer.readUInt16LE(26) & 0x3fff;
+    const height = buffer.readUInt16LE(28) & 0x3fff;
+    assertImageDimensions(width, height);
+
+    return {
+      mimeType: 'image/webp',
+      width,
+      height,
+      extension: 'webp',
+    };
+  }
+
+  if (chunkType === 'VP8L') {
+    if (buffer.length < 25 || buffer[20] !== 0x2f) {
+      throw new BadRequestException('Photo WebP structure is invalid');
+    }
+
+    const bits = buffer.readUInt32LE(21);
+    const width = (bits & 0x3fff) + 1;
+    const height = ((bits >> 14) & 0x3fff) + 1;
+    assertImageDimensions(width, height);
+
+    return {
+      mimeType: 'image/webp',
+      width,
+      height,
+      extension: 'webp',
+    };
+  }
+
+  throw new BadRequestException('Photo WebP structure is unsupported');
+}
+
+function assertImageDimensions(width: number, height: number): void {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    throw new BadRequestException('Photo dimensions are invalid');
   }
 }
 

@@ -11,10 +11,13 @@ const defaultEventListLimit = 100;
 export class EventService {
   constructor(private readonly repository: EventRepository) {}
 
-  async createEvent(dto: CreateEventDto): Promise<EventRecord> {
+  async createEvent(
+    dto: CreateEventDto,
+    client?: Prisma.TransactionClient,
+  ): Promise<EventRecord> {
     this.assertCreateEventDto(dto);
 
-    return this.repository.create(dto);
+    return this.repository.create(dto, client);
   }
 
   async getEventById(id: string): Promise<EventRecord> {
