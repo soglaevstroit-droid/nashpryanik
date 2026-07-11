@@ -123,6 +123,25 @@ test('login returns access token and USER_LOGGED_IN event', async () => {
   assert.deepEqual(fixture.eventTypes, ['USER_LOGGED_IN']);
 });
 
+test('login accepts a username identifier', async () => {
+  const passwords = new PasswordService();
+  const fixture = createAuthFixture([
+    createUser({
+      email: 'ilya',
+      passwordHash: passwords.hashPassword('11223344'),
+    }),
+  ]);
+
+  const response = await fixture.auth.login({
+    email: 'ilya',
+    password: '11223344',
+  });
+
+  assert.equal(response.user.email, 'ilya');
+  assert.equal(response.user.role, 'WORKER');
+  assert.ok(response.accessToken);
+});
+
 test('me returns current public user', async () => {
   const fixture = createAuthFixture([createUser()]);
 
@@ -439,7 +458,8 @@ test('work shift photo endpoints allow worker and reject finance', () => {
     true,
   );
   assert.throws(
-    () => guard.canActivate(createHttpContext(createRequest('FINANCE'), startWithPhoto, controller)),
+    () =>
+      guard.canActivate(createHttpContext(createRequest('FINANCE'), startWithPhoto, controller)),
     /Forbidden/,
   );
 });

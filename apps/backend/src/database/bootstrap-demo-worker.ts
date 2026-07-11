@@ -7,7 +7,7 @@ const demoWorkerName = process.env.DEMO_WORKER_NAME ?? 'Илья';
 const demoWorkerEmail = readRequiredEnv('DEMO_WORKER_EMAIL').toLowerCase();
 const demoWorkerPassword = readRequiredEnv('DEMO_WORKER_PASSWORD');
 
-assertEmail(demoWorkerEmail);
+assertLoginIdentifier(demoWorkerEmail);
 assertPassword(demoWorkerPassword);
 
 const database = new DatabaseService(new AppConfigService());
@@ -21,12 +21,6 @@ try {
   });
 
   if (existingUser) {
-    if (existingUser.role !== Role.WORKER || !existingUser.isActive) {
-      throw new Error(
-        'Demo worker email already exists, but the user is not an active WORKER.',
-      );
-    }
-
     const updatedUser = await database.user.update({
       where: {
         email: demoWorkerEmail,
@@ -34,6 +28,8 @@ try {
       data: {
         passwordHash: passwords.hashPassword(demoWorkerPassword),
         name: demoWorkerName,
+        role: Role.WORKER,
+        isActive: true,
       },
     });
 
@@ -72,9 +68,9 @@ function readRequiredEnv(name: string): string {
   return value;
 }
 
-function assertEmail(value: string): void {
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-    throw new Error('DEMO_WORKER_EMAIL must be a valid email.');
+function assertLoginIdentifier(value: string): void {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && !/^[a-zA-Z0-9._-]{3,64}$/.test(value)) {
+    throw new Error('DEMO_WORKER_EMAIL must be a valid email or login.');
   }
 }
 

@@ -121,7 +121,7 @@ export class AuthService {
       throw new BadRequestException('Login body is required');
     }
 
-    assertEmail(dto.email);
+    assertLoginIdentifier(dto.email);
 
     if (typeof dto.password !== 'string' || dto.password.length === 0) {
       throw new BadRequestException('Password is required');
@@ -132,6 +132,15 @@ export class AuthService {
 function assertEmail(value: unknown): void {
   if (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
     throw new BadRequestException('Valid email is required');
+  }
+}
+
+function assertLoginIdentifier(value: unknown): void {
+  if (
+    typeof value !== 'string' ||
+    (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && !/^[a-zA-Z0-9._-]{3,64}$/.test(value))
+  ) {
+    throw new BadRequestException('Valid login is required');
   }
 }
 
