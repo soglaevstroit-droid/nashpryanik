@@ -2,7 +2,7 @@
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>СТРОИТ.РФ</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
@@ -24,7 +24,13 @@
             Логин
             <span class="inputWrap">
               <b>⌾</b>
-              <input id="emailInput" type="text" autocomplete="username" placeholder="Введите email" />
+              <input
+                id="emailInput"
+                type="text"
+                autocomplete="username"
+                enterkeyhint="next"
+                placeholder="Введите email"
+              />
             </span>
           </label>
           <label>
@@ -35,6 +41,7 @@
                 id="passwordInput"
                 type="password"
                 autocomplete="current-password"
+                enterkeyhint="go"
                 placeholder="Введите пароль"
               />
               <em>◉</em>
@@ -471,7 +478,7 @@
         </section>
       </div>
 
-      <section id="messagePanel" class="toast" hidden></section>
+      <section id="messagePanel" class="toast" role="status" aria-live="polite" hidden></section>
     </main>
 
     <script src="/app.js"></script>

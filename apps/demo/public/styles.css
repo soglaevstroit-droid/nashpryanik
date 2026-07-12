@@ -18,17 +18,39 @@
   --shadow: 0 14px 34px rgb(17 17 17 / 8%);
   --radius-card: 16px;
   --radius-control: 12px;
-  --control-height: 56px;
+  --radius-large: 24px;
+  --control-height: clamp(52px, 13vw, 56px);
+  --tap-size: 44px;
+  --page-padding: clamp(16px, 5vw, 22px);
+  --section-gap: clamp(12px, 3.6vw, 18px);
+  --card-padding: clamp(14px, 4.5vw, 20px);
+  --content-max-width: 480px;
+  --bottom-nav-height: 94px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  overflow-x: hidden;
+  min-height: 100svh;
+  min-height: 100dvh;
+  overflow-x: clip;
   background: var(--bg);
   color: var(--text);
 }
@@ -38,27 +60,49 @@ body.is-modal-open {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
+}
+
+input,
+select,
+textarea {
+  max-width: 100%;
+  font-size: 16px;
 }
 
 button {
   border: 0;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active {
+  filter: brightness(0.96);
 }
 
 .phoneShell {
   position: relative;
-  width: min(100%, 440px);
+  width: 100%;
   min-height: 100vh;
-  margin: 0 auto;
-  overflow: hidden;
+  min-height: 100svh;
+  min-height: 100dvh;
+  overflow-x: clip;
   background: var(--bg);
 }
 
 .screen {
   min-height: 100vh;
-  padding: 18px 22px 96px;
+  min-height: 100svh;
+  min-height: 100dvh;
+  padding:
+    calc(var(--page-padding) + var(--safe-top))
+    calc(var(--page-padding) + var(--safe-right))
+    calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--section-gap))
+    calc(var(--page-padding) + var(--safe-left));
 }
 
 .screen[hidden],
@@ -2179,14 +2223,546 @@ p {
   text-align: center;
 }
 
-@media (min-width: 700px) {
+/* Responsive application foundation */
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+}
+
+img,
+video {
+  height: auto;
+}
+
+h1,
+h2,
+h3,
+p,
+strong,
+b,
+small,
+span {
+  overflow-wrap: break-word;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 3px solid rgb(240 122 0 / 32%);
+  outline-offset: 2px;
+}
+
+.screenLogin {
+  padding-bottom: calc(var(--page-padding) + var(--safe-bottom));
+}
+
+.loginCard {
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+}
+
+.loginHero {
+  min-height: clamp(350px, 62dvh, 572px);
+  margin:
+    calc(0px - var(--page-padding) - var(--safe-top))
+    calc(0px - var(--page-padding) - var(--safe-right))
+    0
+    calc(0px - var(--page-padding) - var(--safe-left));
+}
+
+.loginPanel {
+  gap: clamp(11px, 3.2vw, 14px);
+  margin-top: clamp(-116px, -14dvh, -72px);
+  padding: clamp(20px, 6vw, 28px) var(--card-padding) clamp(18px, 5vw, 22px);
+}
+
+.loginPanel h1 {
+  font-size: clamp(24px, 7vw, 28px);
+}
+
+.inputWrap input {
+  width: 100%;
+  font-size: 16px;
+}
+
+.inputWrap input:-webkit-autofill,
+.inputWrap input:-webkit-autofill:hover,
+.inputWrap input:-webkit-autofill:focus {
+  box-shadow: 0 0 0 1000px var(--surface) inset;
+  -webkit-text-fill-color: var(--text);
+}
+
+.loginOptions {
+  flex-wrap: wrap;
+}
+
+.primaryButton,
+.secondaryButton,
+.helpButton,
+.startWorkButton,
+.currentStepBubble button {
+  min-height: max(var(--tap-size), var(--control-height));
+  padding-inline: 14px;
+  line-height: 1.25;
+}
+
+.linkButton {
+  min-height: var(--tap-size);
+  padding-inline: 4px;
+}
+
+.appScreen {
+  padding:
+    calc(var(--page-padding) + var(--safe-top))
+    calc(var(--page-padding) + var(--safe-right))
+    calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--section-gap))
+    calc(var(--page-padding) + var(--safe-left));
+}
+
+.workerTop {
+  gap: clamp(14px, 4.5vw, 20px);
+  margin-bottom: clamp(20px, 6vw, 28px);
+  padding: clamp(20px, 6vw, 30px) var(--card-padding) clamp(18px, 5vw, 24px);
+  border-radius: clamp(22px, 7vw, 28px);
+}
+
+.workerTopMain > *,
+.workerPerson > *,
+.sectionTitle > *,
+.pageHead > *,
+.taskCardProgressRow > *,
+.miniTaskList article > *,
+.taskHero > *,
+.taskProgress > *,
+.stepList article > *,
+.fileItem > *,
+.cameraActions > *,
+.taskStatusConfirmActions > * {
+  min-width: 0;
+}
+
+.workerPerson strong {
+  font-size: clamp(20px, 6.3vw, 25px);
+  white-space: normal;
+}
+
+.coinBox {
+  min-width: clamp(88px, 27vw, 108px);
+  min-height: 50px;
+  padding: 11px 9px;
+}
+
+.coinBox strong {
+  font-size: clamp(17px, 5vw, 20px);
+}
+
+.workerStats {
+  gap: var(--section-gap);
+  padding-inline: clamp(0px, 2vw, 8px);
+}
+
+.sectionTitle h1,
+.pageHead h1,
+.objectBlock h2,
+.currentStage h2 {
+  font-size: clamp(21px, 6.5vw, 26px);
+}
+
+.sectionTitle {
+  flex-wrap: wrap;
+}
+
+.pageHead {
+  gap: clamp(10px, 4vw, 16px);
+  margin-bottom: clamp(18px, 6vw, 26px);
+}
+
+.pageHead h1 {
+  flex: 1;
+  text-align: center;
+}
+
+.iconOnly {
+  width: clamp(44px, 13vw, 52px);
+  height: clamp(44px, 13vw, 52px);
+  flex: 0 0 auto;
+}
+
+.recommendedCard,
+.whiteCard {
+  padding: var(--card-padding);
+}
+
+.taskCard p {
+  white-space: normal;
+}
+
+.miniTaskList article {
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 13px var(--card-padding);
+}
+
+.miniTaskList span {
+  text-align: right;
+}
+
+.taskStatusHead {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.taskStatusControl {
+  grid-template-columns: minmax(0, 1fr) 38px;
+  min-width: 0;
+  padding-left: clamp(12px, 5vw, 24px);
+}
+
+.taskStatusControl span {
+  width: 100%;
+  margin-left: clamp(4px, 3vw, 16px);
+}
+
+.taskTitleBlock h2 {
+  max-height: none;
+  -webkit-line-clamp: unset;
+}
+
+.taskProgress {
+  grid-template-columns: auto minmax(70px, 1fr) auto;
+  gap: clamp(8px, 3vw, 14px);
+}
+
+.stepList article {
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+}
+
+.stepTimelineCard {
+  padding: clamp(10px, 4vw, 16px);
+}
+
+.currentStepBubble {
+  padding: clamp(16px, 5vw, 22px) clamp(14px, 4.5vw, 20px) clamp(18px, 5vw, 24px);
+}
+
+.stepTimelineFuture em {
+  min-width: 0;
+  padding-inline: clamp(7px, 3vw, 13px);
+}
+
+.currentStage .sectionTitle {
+  align-items: flex-start;
+}
+
+.photoCarousel {
+  width: calc(100% + var(--page-padding) + var(--safe-right));
+  margin-right: calc(0px - var(--page-padding) - var(--safe-right));
+  padding-right: calc(var(--page-padding) + var(--safe-right));
+  scroll-padding-right: calc(var(--page-padding) + var(--safe-right));
+}
+
+.photoSlide .mockPhoto,
+.photoSlide img,
+.photoSlide .photoPlaceholder,
+.photoSlide .cameraPreview {
+  min-height: clamp(172px, 52vw, 230px);
+  overflow: hidden;
+}
+
+.photoSlide img {
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.resultCarousel .mockPhoto,
+.resultCarousel .photoPlaceholder,
+.resultCarousel .cameraPreview {
+  min-height: clamp(230px, 76vw, 320px);
+}
+
+#stagePhotoView {
+  min-height: calc(100vh - var(--safe-top));
+  min-height: calc(100svh - var(--safe-top));
+  min-height: calc(100dvh - var(--safe-top));
+  padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 88px);
+}
+
+.stagePhotoBody {
+  min-height: calc(100vh - 300px);
+  min-height: calc(100svh - 300px);
+  min-height: calc(100dvh - 300px);
+}
+
+.stagePhotoAction {
+  right: calc(var(--page-padding) + var(--safe-right));
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 8px);
+  left: calc(var(--page-padding) + var(--safe-left));
+  width: auto;
+  max-width: calc(var(--content-max-width) - var(--page-padding) - var(--page-padding));
+  margin-inline: auto;
+  transform: none;
+}
+
+.centerResult {
+  min-height: calc(100vh - var(--bottom-nav-height) - var(--safe-top) - var(--safe-bottom));
+  min-height: calc(100svh - var(--bottom-nav-height) - var(--safe-top) - var(--safe-bottom));
+  min-height: calc(100dvh - var(--bottom-nav-height) - var(--safe-top) - var(--safe-bottom));
+}
+
+.fileItem strong {
+  overflow-wrap: anywhere;
+}
+
+.stickyActions {
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom));
+}
+
+.bottomNav {
+  right: 0;
+  left: 0;
+  width: 100%;
+  min-height: calc(var(--bottom-nav-height) + var(--safe-bottom));
+  padding:
+    24px calc(8px + var(--safe-right))
+    max(8px, var(--safe-bottom))
+    calc(8px + var(--safe-left));
+  transform: none;
+}
+
+.bottomNav::before {
+  right: var(--safe-right);
+  bottom: 0;
+  left: var(--safe-left);
+}
+
+.bottomNav button {
+  min-width: 0;
+  min-height: var(--tap-size);
+}
+
+.bottomNav span {
+  max-width: 100%;
+  font-size: clamp(10px, 3vw, 12px);
+}
+
+.modalLayer {
+  align-items: center;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding:
+    calc(var(--page-padding) + var(--safe-top))
+    calc(var(--page-padding) + var(--safe-right))
+    calc(var(--page-padding) + var(--safe-bottom))
+    calc(var(--page-padding) + var(--safe-left));
+}
+
+.modalCard {
+  max-height: calc(100vh - var(--page-padding) - var(--page-padding) - var(--safe-top) - var(--safe-bottom));
+  max-height: calc(100svh - var(--page-padding) - var(--page-padding) - var(--safe-top) - var(--safe-bottom));
+  max-height: calc(100dvh - var(--page-padding) - var(--page-padding) - var(--safe-top) - var(--safe-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: clamp(22px, 7vw, 32px) var(--card-padding) clamp(18px, 6vw, 24px);
+}
+
+.modalCard h2 {
+  font-size: clamp(22px, 7vw, 27px);
+}
+
+.modalIcon {
+  width: clamp(72px, 23vw, 92px);
+  height: clamp(72px, 23vw, 92px);
+  margin-bottom: clamp(14px, 5vw, 20px);
+}
+
+.shiftCameraModal {
+  padding: clamp(18px, 6vw, 28px) var(--card-padding) clamp(16px, 5vw, 22px);
+}
+
+.cameraCaptureBox {
+  max-height: min(52dvh, 520px);
+}
+
+.pauseReasonField textarea {
+  font-size: 16px;
+}
+
+.toast {
+  right: calc(var(--page-padding) + var(--safe-right));
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + 8px);
+  left: calc(var(--page-padding) + var(--safe-left));
+  width: auto;
+  max-width: calc(var(--content-max-width) - var(--page-padding) - var(--page-padding));
+}
+
+@media (max-width: 359px) {
+  :root {
+    --page-padding: 14px;
+    --card-padding: 14px;
+    --bottom-nav-height: 88px;
+  }
+
+  .statusBar {
+    margin-bottom: 12px;
+  }
+
+  .loginHero {
+    min-height: 330px;
+  }
+
+  .workerTopMain {
+    gap: 6px;
+  }
+
+  .avatar {
+    width: 50px;
+    height: 50px;
+    flex-basis: 50px;
+  }
+
+  .workerPerson small {
+    white-space: normal;
+  }
+
+  .coinBox {
+    min-width: 82px;
+    padding-inline: 7px;
+  }
+
+  .coinIcon {
+    width: 18px;
+    height: 18px;
+    margin-left: 4px;
+  }
+
+  .miniTaskList article {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .miniTaskList article > span {
+    grid-column: 2;
+    justify-self: start;
+    text-align: left;
+  }
+
+  .stepTimeline {
+    --step-axis: 20px;
+    --step-rail: 40px;
+  }
+
+  .stepTimeline article.stepTimelineFuture {
+    grid-template-columns: var(--step-rail) minmax(0, 1fr) auto 14px;
+    column-gap: 5px;
+  }
+
+  .stepTimelineFuture:not(:last-child)::after {
+    left: 46px;
+  }
+
+  .stepTimelineFuture em {
+    font-size: 11px;
+  }
+
+  .cameraActions,
+  .taskStatusConfirmActions {
+    grid-template-columns: 1fr;
+  }
+
+  .rewardRow {
+    grid-template-columns: 1fr;
+  }
+
+  .bottomNav {
+    padding-inline: calc(4px + var(--safe-left)) calc(4px + var(--safe-right));
+  }
+
+  .bottomNav button {
+    gap: 5px;
+  }
+
+  .navBriefcase,
+  .navChat,
+  .navArchive,
+  .navUser {
+    width: 25px;
+    height: 25px;
+  }
+
+  .navOrder {
+    width: 50px;
+    height: 50px;
+  }
+}
+
+@media (max-height: 700px) {
+  .loginHero {
+    min-height: clamp(300px, 54dvh, 380px);
+  }
+
+  .loginPanel {
+    margin-top: -72px;
+  }
+
+  .modalLayer {
+    align-items: start;
+  }
+
+  .modalIcon {
+    width: 64px;
+    height: 64px;
+    font-size: 32px;
+  }
+
+  .cameraCaptureBox {
+    max-height: 44dvh;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .screen {
+    padding-top: calc(12px + var(--safe-top));
+  }
+
+  .statusBar {
+    display: none;
+  }
+
+  .loginHero {
+    min-height: 220px;
+  }
+
+  .loginPanel {
+    margin-top: -56px;
+  }
+
+  .stagePhotoBody,
+  .centerResult {
+    min-height: auto;
+    align-content: start;
+  }
+}
+
+@media (min-width: 768px) and (min-height: 600px) {
   body {
     padding: 18px 0;
   }
 
   .phoneShell {
-    min-height: 956px;
+    max-width: var(--content-max-width);
+    min-height: calc(100dvh - 36px);
+    margin-inline: auto;
     border-radius: 42px;
     box-shadow: 0 20px 80px rgb(17 17 17 / 20%);
+  }
+
+  .bottomNav {
+    right: 50%;
+    left: auto;
+    width: var(--content-max-width);
+    transform: translateX(50%);
   }
 }
