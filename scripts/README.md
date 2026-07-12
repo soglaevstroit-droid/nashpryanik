@@ -40,3 +40,7 @@ PID запущенных процессов хранится в `.runtime/dev-pr
 Подготовительная команда `npm run backup` проверяет локальные prerequisites, создаёт будущую
 структуру хранения и выводит план без подключения к production и без запуска `pg_dump`.
 Подробный процесс описан в [`docs/PRODUCTION_BACKUP.md`](../docs/PRODUCTION_BACKUP.md).
+
+`npm run backup:check` выполняет разрешённую read-only диагностику готовности production.
+JSON-результат доступен через `npm run backup:check -- --json`. Команда не создаёт backup и
+не запускает `pg_dump`.
