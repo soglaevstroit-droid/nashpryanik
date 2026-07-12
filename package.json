@@ -7,6 +7,8 @@
     "apps/backend"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "stop": "node scripts/stop-dev.mjs",
     "format:check": "prettier --check \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \".github/**/*.yml\" \"apps/**/*.{json,md,ts,yaml}\" \"packages/**/*.md\" \"infra/**/*.{md,yml}\" \"scripts/**/*.{mjs,md}\" \"docs/**/*.md\" \"*.{json,mjs}\" \".*.jsonc\"",
     "lint": "eslint .",
     "lint:md": "markdownlint-cli2 \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \"apps/**/*.md\" \"packages/**/*.md\" \"infra/**/*.md\" \"scripts/**/*.md\" \"docs/**/*.md\" \"!**/node_modules/**\"",
@@ -18,9 +20,10 @@
     "backend:db:check": "npm run db:check -w @stroit/backend",
     "backend:bootstrap-demo-worker": "npm run bootstrap:demo-worker -w @stroit/backend",
     "demo:dev": "node apps/demo/server.mjs",
-    "prisma:generate": "node --env-file=.env apps/backend/node_modules/prisma/build/index.js generate --schema apps/backend/prisma/schema.prisma",
-    "prisma:migrate": "node --env-file=.env apps/backend/node_modules/prisma/build/index.js migrate dev --schema apps/backend/prisma/schema.prisma",
-    "prisma:studio": "node --env-file=.env apps/backend/node_modules/prisma/build/index.js studio --schema apps/backend/prisma/schema.prisma",
+    "prisma:generate": "node scripts/prisma.mjs generate",
+    "prisma:migrate": "node scripts/prisma.mjs migrate dev",
+    "prisma:migrate:deploy": "node scripts/prisma.mjs migrate deploy",
+    "prisma:studio": "node scripts/prisma.mjs studio",
     "test": "npm run backend:test"
   },
   "devDependencies": {

@@ -4,6 +4,7 @@
 .env
 .env.*
 !.env.example
+.runtime/
 
 # Dependencies
 node_modules/

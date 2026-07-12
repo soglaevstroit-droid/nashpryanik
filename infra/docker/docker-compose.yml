@@ -47,7 +47,7 @@ services:
     volumes:
       - stroit_minio_data:/data
     healthcheck:
-      test: ['CMD-SHELL', 'curl -f http://localhost:9000/minio/health/live || exit 1']
+      test: ['CMD', 'mc', 'ready', 'local']
       interval: 10s
       timeout: 5s
       retries: 5
