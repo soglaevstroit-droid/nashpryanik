@@ -7,6 +7,8 @@ import { ArtifactDownload, ArtifactRecord } from './artifact-record.js';
 import { ArtifactRepository } from './artifact.repository.js';
 import { ArtifactStorageService } from './artifact-storage.service.js';
 import { UploadedArtifactFile } from './uploaded-artifact-file.js';
+import { DatabaseService } from '../database/database.service.js';
+import { ActiveShiftAccessService } from '../work-shifts/active-shift-access.service.js';
 
 const maxPhotoFileSizeBytes = 10 * 1024 * 1024;
 const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/webp']);
@@ -31,6 +33,7 @@ interface CreatePhotoArtifactRecordOptions {
   eventEntityId?: string;
   eventPayload?: Record<string, unknown>;
   eventMetadata?: Record<string, unknown>;
+  workShiftId?: string | null;
 }
 
 @Injectable()
@@ -39,6 +42,8 @@ export class ArtifactService {
     private readonly repository: ArtifactRepository,
     private readonly storage: ArtifactStorageService,
     private readonly events: EventService,
+    private readonly database?: DatabaseService,
+    private readonly activeShiftAccess?: ActiveShiftAccessService,
   ) {}
 
   async uploadPhoto(
@@ -48,10 +53,16 @@ export class ArtifactService {
   ): Promise<ArtifactRecord> {
     assertAuthUser(user);
     assertUploadPhotoDto(dto);
+    if (dto.taskId || dto.taskStepId) await this.activeShiftAccess?.assertActiveShift(user);
+    await this.assertUploadContext(user, dto);
     const uploaded = await this.uploadPhotoObject(user, file);
 
     try {
-      return await this.createPhotoArtifactRecord(user, dto, uploaded);
+      return this.database
+        ? await this.database.$transaction((client) =>
+            this.createPhotoArtifactRecord(user, dto, uploaded, client),
+          )
+        : await this.createPhotoArtifactRecord(user, dto, uploaded);
     } catch (error) {
       await this.deleteStoredPhoto(uploaded.storageKey);
       throw error;
@@ -62,7 +73,10 @@ export class ArtifactService {
     return inspectPhotoFile(file);
   }
 
-  async uploadPhotoObject(user: AuthUser, file: UploadedArtifactFile): Promise<UploadedPhotoObject> {
+  async uploadPhotoObject(
+    user: AuthUser,
+    file: UploadedArtifactFile,
+  ): Promise<UploadedPhotoObject> {
     const uploaded = this.preparePhotoObject(user, file);
     await this.storePreparedPhoto(uploaded);
 
@@ -104,6 +118,9 @@ export class ArtifactService {
         actorId: user.id,
         entityType: 'artifact',
         entityId: options.eventEntityId ?? null,
+        taskId: dto.taskId ?? null,
+        taskStepId: dto.taskStepId ?? null,
+        workShiftId: options.workShiftId ?? null,
         payload: {
           artifactType: 'PHOTO',
           taskId: dto.taskId ?? null,
@@ -129,6 +146,7 @@ export class ArtifactService {
         eventId: event.id,
         taskId: dto.taskId ?? null,
         taskStepId: dto.taskStepId ?? null,
+        workShiftId: options.workShiftId ?? null,
         uploadedBy: user.id,
         storageKey,
         originalFileName: file.originalname,
@@ -145,8 +163,9 @@ export class ArtifactService {
     });
   }
 
-  async getPhoto(id: string): Promise<ArtifactDownload> {
-    const artifact = await this.getArtifactRecord(id);
+  async getPhoto(userOrId: AuthUser | string, id?: string): Promise<ArtifactDownload> {
+    const artifact = await this.getArtifactRecord(typeof userOrId === 'string' ? userOrId : id!);
+    if (typeof userOrId !== 'string') await this.assertCanAccess(userOrId, artifact);
     const stream = await this.storage.getObject(artifact.storageKey);
 
     return {
@@ -155,18 +174,58 @@ export class ArtifactService {
     };
   }
 
-  async listPhotos(eventId: string): Promise<ArtifactRecord[]> {
-    assertEventId(eventId);
+  async listPhotos(userOrEventId: AuthUser | string, eventId?: string): Promise<ArtifactRecord[]> {
+    const resolvedEventId = typeof userOrEventId === 'string' ? userOrEventId : eventId!;
+    assertEventId(resolvedEventId);
 
-    return this.repository.findManyByEventId(eventId, defaultArtifactListLimit);
+    const photos = await this.repository.findManyByEventId(
+      resolvedEventId,
+      defaultArtifactListLimit,
+    );
+    if (typeof userOrEventId !== 'string')
+      for (const photo of photos) await this.assertCanAccess(userOrEventId, photo);
+    return photos;
   }
 
-  async deletePhoto(id: string): Promise<ArtifactRecord> {
-    const artifact = await this.getArtifactRecord(id);
+  async deletePhoto(userOrId: AuthUser | string, id?: string): Promise<ArtifactRecord> {
+    const artifact = await this.getArtifactRecord(typeof userOrId === 'string' ? userOrId : id!);
+    if (typeof userOrId !== 'string') await this.assertCanAccess(userOrId, artifact);
 
     await this.storage.deleteObject(artifact.storageKey);
 
-    return this.repository.delete(id);
+    return this.repository.delete(artifact.id);
+  }
+
+  private async assertCanAccess(user: AuthUser, artifact: ArtifactRecord): Promise<void> {
+    if (user.role !== 'WORKER' || artifact.uploadedBy === user.id) return;
+    if (artifact.taskId && this.database) {
+      const task = await this.database.task.findUnique({
+        where: { id: artifact.taskId },
+        select: { assigneeId: true },
+      });
+      if (task?.assigneeId === user.id) return;
+    }
+    throw new NotFoundException('Photo not found');
+  }
+
+  private async assertUploadContext(user: AuthUser, dto: UploadPhotoDto): Promise<void> {
+    if (user.role !== 'WORKER' || !this.database) return;
+    const taskId =
+      dto.taskId ??
+      (dto.taskStepId
+        ? (
+            await this.database.taskStep.findUnique({
+              where: { id: dto.taskStepId },
+              select: { taskId: true },
+            })
+          )?.taskId
+        : null);
+    if (!taskId) return;
+    const task = await this.database.task.findUnique({
+      where: { id: taskId },
+      select: { assigneeId: true },
+    });
+    if (task?.assigneeId !== user.id) throw new NotFoundException('Task not found');
   }
 
   private async getArtifactRecord(id: string): Promise<ArtifactRecord> {
@@ -312,11 +371,7 @@ function inspectJpegBuffer(buffer: Buffer): Omit<PhotoInspection, 'fileSize'> | 
 }
 
 function isJpegStartOfFrame(marker: number): boolean {
-  return (
-    marker >= 0xc0 &&
-    marker <= 0xcf &&
-    ![0xc4, 0xc8, 0xcc].includes(marker)
-  );
+  return marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
 }
 
 function inspectWebpBuffer(buffer: Buffer): Omit<PhotoInspection, 'fileSize'> | null {

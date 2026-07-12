@@ -6,6 +6,11 @@ export interface CreateEventDto {
   actorId?: string | null;
   entityType?: string | null;
   entityId?: string | null;
+  objectId?: string | null;
+  taskId?: string | null;
+  taskStepId?: string | null;
+  workShiftId?: string | null;
+  idempotencyKey?: string | null;
   payload: Prisma.InputJsonValue;
   metadata?: Prisma.InputJsonValue | null;
 }

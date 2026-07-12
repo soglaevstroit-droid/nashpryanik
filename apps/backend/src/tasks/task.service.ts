@@ -1,13 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { TaskPriority, TaskStatus } from '@prisma/client';
+import { Prisma, TaskPriority, TaskStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth-user.js';
 import { EventService } from '../events/event.service.js';
 import { EventType } from '../events/event-types.js';
 import { ProcessService } from '../processes/process.service.js';
+import { DatabaseService } from '../database/database.service.js';
 import { AssignTaskDto } from './dto/assign-task.dto.js';
 import { CreateTaskDto } from './dto/create-task.dto.js';
 import { TaskRecord } from './task-record.js';
 import { TaskRepository } from './task.repository.js';
+import { ActiveShiftAccessService } from '../work-shifts/active-shift-access.service.js';
 
 const defaultTaskListLimit = 100;
 
@@ -17,6 +19,8 @@ export class TaskService {
     private readonly repository: TaskRepository,
     private readonly events: EventService,
     private readonly processes: ProcessService,
+    private readonly database?: DatabaseService,
+    private readonly activeShiftAccess?: ActiveShiftAccessService,
   ) {}
 
   async createTask(user: AuthUser, dto: CreateTaskDto): Promise<TaskRecord> {
@@ -35,6 +39,7 @@ export class TaskService {
       priority: dto.priority ?? 'NORMAL',
       creatorId: user.id,
       processId: activeProcess.id,
+      objectId: dto.objectId!,
     });
 
     await this.createTaskEvent(user, task, 'TASK_CREATED', 'TASK_CREATED');
@@ -62,21 +67,45 @@ export class TaskService {
   }
 
   async acceptTask(user: AuthUser, id: string): Promise<TaskRecord> {
-    await this.prepareWorkerTransition(user, id, ['ASSIGNED'], 'accept');
-    const updated = await this.repository.update(id, { status: 'ACCEPTED' });
-
-    await this.createTaskEvent(user, updated, 'TASK_ACCEPTED', 'TASK_ACCEPTED');
-
-    return updated;
+    const task = await this.prepareWorkerTransition(user, id, ['ASSIGNED'], 'accept');
+    const snapshot = await this.eventSnapshot(user, task);
+    return this.transaction(async (client) => {
+      const current = await this.repository.findById(id, client);
+      if (!current || current.status !== 'ASSIGNED')
+        throw new BadRequestException('Task was already accepted');
+      const updated = await this.repository.update(id, { status: 'ACCEPTED' }, client);
+      await this.createTaskEvent(
+        user,
+        updated,
+        'TASK_ACCEPTED',
+        'TASK_ACCEPTED',
+        {},
+        client,
+        snapshot,
+      );
+      return updated;
+    });
   }
 
   async startTask(user: AuthUser, id: string): Promise<TaskRecord> {
     const task = await this.prepareWorkerTransition(user, id, ['ACCEPTED'], 'start');
-    const updated = await this.repository.update(task.id, { status: 'IN_PROGRESS' });
-
-    await this.createTaskEvent(user, updated, 'TASK_STARTED', 'TASK_STARTED');
-
-    return updated;
+    const snapshot = await this.eventSnapshot(user, task);
+    return this.transaction(async (client) => {
+      const current = await this.repository.findById(id, client);
+      if (!current || current.status !== 'ACCEPTED')
+        throw new BadRequestException('Task was already started');
+      const updated = await this.repository.update(task.id, { status: 'IN_PROGRESS' }, client);
+      await this.createTaskEvent(
+        user,
+        updated,
+        'TASK_STARTED',
+        'TASK_STARTED',
+        {},
+        client,
+        snapshot,
+      );
+      return updated;
+    });
   }
 
   async sendToReview(user: AuthUser, id: string): Promise<TaskRecord> {
@@ -95,19 +124,35 @@ export class TaskService {
       ['IN_PROGRESS', 'ON_REVIEW'],
       'complete',
     );
-    const updated = await this.repository.update(task.id, {
-      status: 'COMPLETED',
-      completedAt: new Date(),
+    const incompleteSteps = this.database ? await this.repository.countIncompleteSteps(task.id) : 0;
+    if (incompleteSteps > 0) throw new BadRequestException('Complete all task steps first');
+    const snapshot = await this.eventSnapshot(user, task);
+    const updated = await this.transaction(async (client) => {
+      const result = await this.repository.update(
+        task.id,
+        { status: 'COMPLETED', completedAt: new Date() },
+        client,
+      );
+      await this.createTaskEvent(
+        user,
+        result,
+        'TASK_COMPLETED',
+        'TASK_COMPLETED',
+        {},
+        client,
+        snapshot,
+      );
+      return result;
     });
 
     await this.processes.completeProcess(updated.processId);
-    await this.createTaskEvent(user, updated, 'TASK_COMPLETED', 'TASK_COMPLETED');
 
     return updated;
   }
 
   async cancelTask(user: AuthUser, id: string): Promise<TaskRecord> {
     assertAuthUser(user);
+    await this.activeShiftAccess?.assertActiveShift(user);
 
     const task = await this.getTask(id);
     this.assertTransition(
@@ -153,6 +198,7 @@ export class TaskService {
     action: string,
   ): Promise<TaskRecord> {
     assertAuthUser(user);
+    await this.activeShiftAccess?.assertActiveShift(user);
 
     const task = await this.getTask(id);
     this.assertTransition(task, allowed, action);
@@ -183,25 +229,59 @@ export class TaskService {
     type: EventType,
     action: string,
     extraPayload: Record<string, unknown> = {},
+    client?: Prisma.TransactionClient,
+    snapshot?: Record<string, unknown>,
   ): Promise<void> {
-    await this.events.createEvent({
-      type,
-      actorId: user.id,
-      entityType: 'task',
-      entityId: task.id,
-      payload: {
-        action,
-        status: task.status,
-        priority: task.priority,
-        processId: task.processId,
-        creatorId: task.creatorId,
-        assigneeId: task.assigneeId,
-        ...extraPayload,
+    await this.events.createEvent(
+      {
+        type,
+        actorId: user.id,
+        entityType: 'task',
+        entityId: task.id,
+        objectId: task.objectId,
+        taskId: task.id,
+        payload: {
+          action,
+          status: task.status,
+          priority: task.priority,
+          processId: task.processId,
+          creatorId: task.creatorId,
+          assigneeId: task.assigneeId,
+          ...extraPayload,
+        },
+        metadata: {
+          source: 'task-foundation',
+          ...(snapshot ?? {}),
+        },
       },
-      metadata: {
-        source: 'task-foundation',
-      },
-    });
+      client,
+    );
+  }
+
+  private async eventSnapshot(user: AuthUser, task: TaskRecord): Promise<Record<string, unknown>> {
+    if (!this.database) return { taskTitle: task.title };
+    const [actor, object] = await Promise.all([
+      this.database.user.findUnique({ where: { id: user.id }, select: { name: true } }),
+      task.objectId
+        ? this.database.constructionObject.findUnique({
+            where: { id: task.objectId },
+            select: { name: true },
+          })
+        : null,
+    ]);
+    return {
+      actorName: actor?.name ?? null,
+      objectName: object?.name ?? null,
+      taskTitle: task.title,
+    };
+  }
+
+  private transaction<T>(
+    action: (client: Prisma.TransactionClient | undefined) => Promise<T>,
+  ): Promise<T> {
+    return this.database
+      ? this.database.$transaction((client) => action(client))
+      : action(undefined);
   }
 }
 
@@ -230,6 +310,9 @@ function assertCreateTaskDto(dto: CreateTaskDto): void {
 
   if (dto.priority !== undefined && !isTaskPriority(dto.priority)) {
     throw new BadRequestException('Task priority is invalid');
+  }
+  if (typeof dto.objectId !== 'string' || dto.objectId.length === 0) {
+    throw new BadRequestException('Task objectId is required');
   }
 }
 

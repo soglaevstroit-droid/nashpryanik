@@ -7,8 +7,10 @@
     "apps/backend"
   ],
   "scripts": {
-    "backup": "node scripts/backup.mjs",
+    "backup": "node scripts/backup-create.mjs",
     "backup:check": "node scripts/backup-check.mjs",
+    "backup:create": "node scripts/backup-create.mjs",
+    "backup:restore-check": "node scripts/backup-restore-check.mjs",
     "dev": "node scripts/dev.mjs",
     "stop": "node scripts/stop-dev.mjs",
     "format:check": "prettier --check \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \".github/**/*.yml\" \"apps/**/*.{json,md,ts,yaml}\" \"packages/**/*.md\" \"infra/**/*.{md,yml}\" \"scripts/**/*.{mjs,md}\" \"docs/**/*.md\" \"*.{json,mjs}\" \".*.jsonc\"",
@@ -22,11 +24,14 @@
     "backend:db:check": "npm run db:check -w @stroit/backend",
     "backend:bootstrap-demo-worker": "npm run bootstrap:demo-worker -w @stroit/backend",
     "demo:dev": "node apps/demo/server.mjs",
+    "publish": "node scripts/publish.mjs",
+    "publish:check": "node scripts/publish-check.mjs",
     "prisma:generate": "node scripts/prisma.mjs generate",
     "prisma:migrate": "node scripts/prisma.mjs migrate dev",
     "prisma:migrate:deploy": "node scripts/prisma.mjs migrate deploy",
     "prisma:studio": "node scripts/prisma.mjs studio",
-    "test": "npm run backend:test"
+    "scripts:test": "node --test scripts/*.spec.mjs",
+    "test": "npm run backend:test && npm run scripts:test"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

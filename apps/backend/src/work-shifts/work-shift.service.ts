@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
 import { Prisma, WorkShiftPhotoType } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { ArtifactRecord } from '../artifacts/artifact-record.js';
@@ -14,6 +20,7 @@ import { WorkShiftPhotoRecord } from './work-shift-photo-record.js';
 import { WorkShiftPhotoRepository } from './work-shift-photo.repository.js';
 import { WorkShiftRecord } from './work-shift-record.js';
 import { WorkShiftRepository } from './work-shift.repository.js';
+import { ShiftAccrualService } from './shift-accrual.service.js';
 
 const defaultHistoryLimit = 100;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -34,6 +41,7 @@ export class WorkShiftService {
     private readonly artifacts: ArtifactService,
     private readonly processRepository: ProcessRepository,
     private readonly shiftPhotos: WorkShiftPhotoRepository,
+    @Optional() private readonly accruals?: ShiftAccrualService,
   ) {}
 
   async startShift(user: AuthUser): Promise<WorkShiftRecord> {
@@ -61,12 +69,14 @@ export class WorkShiftService {
       actorId: user.id,
       entityType: 'work_shift',
       entityId: shift.id,
+      workShiftId: shift.id,
       payload: {
         status: shift.status,
         processId: shift.processId,
       },
       metadata: {
         source: 'work-shift-foundation',
+        actorName: user.email,
       },
     });
 
@@ -93,12 +103,14 @@ export class WorkShiftService {
       actorId: user.id,
       entityType: 'work_shift',
       entityId: shift.id,
+      workShiftId: shift.id,
       payload: {
         status: shift.status,
         processId: shift.processId,
       },
       metadata: {
         source: 'work-shift-foundation',
+        actorName: user.email,
       },
     });
 
@@ -135,7 +147,12 @@ export class WorkShiftService {
     return this.executePhotoActionWithCompensation(
       uploaded,
       async (client, storePhoto) => {
-        const duplicate = await this.findExistingOperation(action.operationId, user, 'START', client);
+        const duplicate = await this.findExistingOperation(
+          action.operationId,
+          user,
+          'START',
+          client,
+        );
 
         if (duplicate) {
           return duplicate;
@@ -184,6 +201,7 @@ export class WorkShiftService {
           },
           client,
         );
+        await this.accruals?.createActive(user.id, shift.id, client);
         const photo = await this.shiftPhotos.create(
           {
             id: photoId,
@@ -201,7 +219,15 @@ export class WorkShiftService {
         );
 
         await storePhoto();
-        await this.createWorkShiftEvent('WORK_SHIFT_STARTED', user, shift, photo, artifact, now, client);
+        await this.createWorkShiftEvent(
+          'WORK_SHIFT_STARTED',
+          user,
+          shift,
+          photo,
+          artifact,
+          now,
+          client,
+        );
 
         return {
           shift,
@@ -234,27 +260,30 @@ export class WorkShiftService {
 
     const uploaded = this.artifacts.preparePhotoObject(user, file);
 
-    return this.executePhotoActionWithCompensation(uploaded, async (client, storePhoto) => {
-      const duplicate = await this.findExistingOperation(action.operationId, user, 'FINISH', client);
+    return this.executePhotoActionWithCompensation(
+      uploaded,
+      async (client, storePhoto) => {
+        const duplicate = await this.findExistingOperation(
+          action.operationId,
+          user,
+          'FINISH',
+          client,
+        );
 
-      if (duplicate) {
-        return duplicate;
-      }
+        if (duplicate) {
+          return duplicate;
+        }
 
-      const activeInTransaction = await this.repository.findActiveByUserId(user.id, client);
+        const activeInTransaction = await this.repository.findActiveByUserId(user.id, client);
 
-      if (!activeInTransaction) {
-        throw new ConflictException('Active work shift not found');
-      }
+        if (!activeInTransaction) {
+          throw new ConflictException('Active work shift not found');
+        }
 
-      const now = new Date();
-      const artifactId = randomUUID();
-      const photoId = randomUUID();
-      const artifact = await this.createShiftPhotoArtifact(
-        user,
-        uploaded,
-        client,
-        {
+        const now = new Date();
+        const artifactId = randomUUID();
+        const photoId = randomUUID();
+        const artifact = await this.createShiftPhotoArtifact(user, uploaded, client, {
           artifactId,
           workShiftId: activeInTransaction.id,
           processId: activeInTransaction.processId,
@@ -262,43 +291,53 @@ export class WorkShiftService {
           operationId: action.operationId,
           type: 'FINISH',
           timestamp: now,
-        },
-      );
-      const photo = await this.shiftPhotos.create(
-        {
-          id: photoId,
-          workShiftId: activeInTransaction.id,
-          artifactId: artifact.id,
-          type: 'FINISH',
-          capturedAt: action.capturedAt,
-          source: 'DIRECT_CAMERA_CAPTURE',
-          timezone: action.timezone,
-          width: uploaded.inspection.width,
-          height: uploaded.inspection.height,
-          operationId: action.operationId,
-        },
-        client,
-      );
-      const shift = await this.repository.finish(activeInTransaction.id, now, client);
-
-      if (shift.processId) {
-        await this.processRepository.updateStatus(
-          shift.processId,
-          'COMPLETED',
-          { finishedAt: now },
+        });
+        const photo = await this.shiftPhotos.create(
+          {
+            id: photoId,
+            workShiftId: activeInTransaction.id,
+            artifactId: artifact.id,
+            type: 'FINISH',
+            capturedAt: action.capturedAt,
+            source: 'DIRECT_CAMERA_CAPTURE',
+            timezone: action.timezone,
+            width: uploaded.inspection.width,
+            height: uploaded.inspection.height,
+            operationId: action.operationId,
+          },
           client,
         );
-      }
+        const shift = await this.repository.finish(activeInTransaction.id, now, client);
+        await this.accruals?.finishShift(shift, client);
 
-      await storePhoto();
-      await this.createWorkShiftEvent('WORK_SHIFT_FINISHED', user, shift, photo, artifact, now, client);
+        if (shift.processId) {
+          await this.processRepository.updateStatus(
+            shift.processId,
+            'COMPLETED',
+            { finishedAt: now },
+            client,
+          );
+        }
 
-      return {
-        shift,
-        photo,
-        artifact,
-      };
-    }, () => this.findExistingOperation(action.operationId, user, 'FINISH'));
+        await storePhoto();
+        await this.createWorkShiftEvent(
+          'WORK_SHIFT_FINISHED',
+          user,
+          shift,
+          photo,
+          artifact,
+          now,
+          client,
+        );
+
+        return {
+          shift,
+          photo,
+          artifact,
+        };
+      },
+      () => this.findExistingOperation(action.operationId, user, 'FINISH'),
+    );
   }
 
   history(user: AuthUser): Promise<WorkShiftRecord[]> {
@@ -378,29 +417,24 @@ export class WorkShiftService {
       timestamp: Date;
     },
   ): Promise<ArtifactRecord> {
-    return this.artifacts.createPhotoArtifactRecord(
-      user,
-      {},
-      uploaded,
-      client,
-      {
+    return this.artifacts.createPhotoArtifactRecord(user, {}, uploaded, client, {
+      artifactId: context.artifactId,
+      eventEntityId: context.artifactId,
+      eventPayload: {
+        workShiftId: context.workShiftId,
+        processId: context.processId,
+        workShiftPhotoId: context.workShiftPhotoId,
         artifactId: context.artifactId,
-        eventEntityId: context.artifactId,
-        eventPayload: {
-          workShiftId: context.workShiftId,
-          processId: context.processId,
-          workShiftPhotoId: context.workShiftPhotoId,
-          artifactId: context.artifactId,
-          operationId: context.operationId,
-          source: 'DIRECT_CAMERA_CAPTURE',
-          status: context.type,
-          timestamp: context.timestamp.toISOString(),
-        },
-        eventMetadata: {
-          source: 'work-shift-photo-fixation',
-        },
+        operationId: context.operationId,
+        source: 'DIRECT_CAMERA_CAPTURE',
+        status: context.type,
+        timestamp: context.timestamp.toISOString(),
       },
-    );
+      eventMetadata: {
+        source: 'work-shift-photo-fixation',
+      },
+      workShiftId: context.workShiftId,
+    });
   }
 
   private async createWorkShiftEvent(
@@ -418,6 +452,7 @@ export class WorkShiftService {
         actorId: user.id,
         entityType: 'work_shift',
         entityId: shift.id,
+        workShiftId: shift.id,
         payload: {
           workShiftId: shift.id,
           processId: shift.processId,
@@ -430,6 +465,7 @@ export class WorkShiftService {
         },
         metadata: {
           source: 'work-shift-photo-fixation',
+          actorName: user.email,
         },
       },
       client,

@@ -4,4 +4,5 @@ export interface CreateTaskDto {
   title: string;
   description?: string | null;
   priority?: TaskPriority;
+  objectId?: string;
 }

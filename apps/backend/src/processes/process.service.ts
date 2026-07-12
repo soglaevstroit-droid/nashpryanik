@@ -32,10 +32,15 @@ export class ProcessService {
     this.assertTransition(process, ['CREATED', 'PAUSED'], 'start');
 
     const startedAt = process.startedAt ?? new Date();
-    const updated = await this.repository.updateStatus(id, 'ACTIVE', {
-      startedAt,
-      finishedAt: undefined,
-    }, client);
+    const updated = await this.repository.updateStatus(
+      id,
+      'ACTIVE',
+      {
+        startedAt,
+        finishedAt: undefined,
+      },
+      client,
+    );
     await this.createProcessEvent(
       updated,
       process.status === 'PAUSED' ? 'PROCESS_RESUMED' : 'PROCESS_STARTED',
@@ -59,9 +64,14 @@ export class ProcessService {
     const process = await this.getProcess(id, client);
     this.assertTransition(process, ['ACTIVE', 'PAUSED'], 'complete');
 
-    const updated = await this.repository.updateStatus(id, 'COMPLETED', {
-      finishedAt: new Date(),
-    }, client);
+    const updated = await this.repository.updateStatus(
+      id,
+      'COMPLETED',
+      {
+        finishedAt: new Date(),
+      },
+      client,
+    );
     await this.createProcessEvent(updated, 'PROCESS_COMPLETED', client);
 
     return updated;
@@ -125,18 +135,21 @@ export class ProcessService {
     type: EventType,
     client?: Prisma.TransactionClient,
   ): Promise<void> {
-    await this.events.createEvent({
-      type,
-      entityType: 'process',
-      entityId: process.id,
-      payload: {
-        processType: process.type,
-        processStatus: process.status,
+    await this.events.createEvent(
+      {
+        type,
+        entityType: 'process',
+        entityId: process.id,
+        payload: {
+          processType: process.type,
+          processStatus: process.status,
+        },
+        metadata: {
+          source: 'process-engine',
+        },
       },
-      metadata: {
-        source: 'process-engine',
-      },
-    }, client);
+      client,
+    );
   }
 }
 

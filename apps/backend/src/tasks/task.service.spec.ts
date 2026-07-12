@@ -174,6 +174,7 @@ test('creates task with process and event', async () => {
   const task = await service.createTask(manager, {
     title: 'Install formwork',
     priority: 'HIGH',
+    objectId: 'object-1',
   });
 
   assert.equal(task.status, 'CREATED');
@@ -335,4 +336,28 @@ test('rejects worker action on another worker task', async () => {
   );
 
   await assert.rejects(() => service.acceptTask(worker, 'task-1'), BadRequestException);
+});
+
+test('worker task actions require an active shift before reading the task', async () => {
+  let taskRead = false;
+  const repository = createRepository([createTask({ status: 'ASSIGNED', assigneeId: worker.id })]);
+  const originalFindById = repository.findById.bind(repository);
+  repository.findById = async (...args) => {
+    taskRead = true;
+    return originalFindById(...args);
+  };
+  const service = new TaskService(
+    repository,
+    createEventService([]),
+    createProcessService([]),
+    undefined,
+    {
+      assertActiveShift: async () => {
+        throw new Error('ACTIVE_SHIFT_REQUIRED');
+      },
+    } as never,
+  );
+
+  await assert.rejects(service.acceptTask(worker, 'task-1'), /ACTIVE_SHIFT_REQUIRED/);
+  assert.equal(taskRead, false);
 });

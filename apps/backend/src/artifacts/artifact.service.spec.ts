@@ -20,9 +20,8 @@ const user: AuthUser = {
 
 function createFile(overrides: Partial<UploadedArtifactFile> = {}): UploadedArtifactFile {
   const buffer = Buffer.from([
-    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00,
-    0x10, 0x00, 0x20, 0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11,
-    0x00, 0xff, 0xd9,
+    0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20, 0x03,
+    0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
   ]);
 
   return {
@@ -217,6 +216,27 @@ test('rejects unsupported image content', async () => {
       ),
     BadRequestException,
   );
+});
+
+test('worker task photo requires an active shift before storing a file', async () => {
+  const storageEvents: string[] = [];
+  const service = new ArtifactService(
+    createRepository(),
+    createStorage(storageEvents),
+    createEventService([]),
+    undefined,
+    {
+      assertActiveShift: async () => {
+        throw new Error('ACTIVE_SHIFT_REQUIRED');
+      },
+    } as never,
+  );
+
+  await assert.rejects(
+    service.uploadPhoto(user, { taskId: 'task-1' }, createFile()),
+    /ACTIVE_SHIFT_REQUIRED/,
+  );
+  assert.deepEqual(storageEvents, []);
 });
 
 test('generates MinIO photo storage key', () => {

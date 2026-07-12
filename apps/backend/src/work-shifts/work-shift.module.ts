@@ -8,14 +8,24 @@ import { DatabaseModule } from '../database/database.module.js';
 import { EventModule } from '../events/event.module.js';
 import { ProcessModule } from '../processes/process.module.js';
 import { WorkShiftController } from './work-shift.controller.js';
+import { ShiftAccrualController } from './shift-accrual.controller.js';
+import { ShiftAccrualService } from './shift-accrual.service.js';
 import { WorkShiftPhotoRepository } from './work-shift-photo.repository.js';
 import { WorkShiftRepository } from './work-shift.repository.js';
 import { WorkShiftService } from './work-shift.service.js';
 
 @Module({
   imports: [AppConfigModule, ArtifactModule, DatabaseModule, EventModule, ProcessModule],
-  controllers: [WorkShiftController],
-  providers: [WorkShiftPhotoRepository, WorkShiftRepository, WorkShiftService, JwtService, JwtAuthGuard, RolesGuard],
-  exports: [WorkShiftService],
+  controllers: [WorkShiftController, ShiftAccrualController],
+  providers: [
+    WorkShiftPhotoRepository,
+    WorkShiftRepository,
+    WorkShiftService,
+    ShiftAccrualService,
+    JwtService,
+    JwtAuthGuard,
+    RolesGuard,
+  ],
+  exports: [WorkShiftService, ShiftAccrualService],
 })
 export class WorkShiftModule {}

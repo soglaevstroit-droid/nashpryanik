@@ -9,6 +9,7 @@ interface CreateTaskData {
   priority: TaskPriority;
   creatorId: string;
   processId: string;
+  objectId: string;
 }
 
 interface UpdateTaskData {
@@ -21,14 +22,17 @@ interface UpdateTaskData {
 export class TaskRepository {
   constructor(private readonly prisma: DatabaseService) {}
 
-  create(data: CreateTaskData): Promise<TaskRecord> {
-    return this.prisma.task.create({
+  create(
+    data: CreateTaskData,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<TaskRecord> {
+    return client.task.create({
       data,
     });
   }
 
-  findById(id: string): Promise<TaskRecord | null> {
-    return this.prisma.task.findUnique({
+  findById(id: string, client: Prisma.TransactionClient = this.prisma): Promise<TaskRecord | null> {
+    return client.task.findUnique({
       where: { id },
     });
   }
@@ -48,10 +52,21 @@ export class TaskRepository {
     });
   }
 
-  update(id: string, data: UpdateTaskData): Promise<TaskRecord> {
-    return this.prisma.task.update({
+  update(
+    id: string,
+    data: UpdateTaskData,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<TaskRecord> {
+    return client.task.update({
       where: { id },
       data: data as Prisma.TaskUpdateInput,
     });
+  }
+
+  countIncompleteSteps(
+    taskId: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<number> {
+    return client.taskStep.count({ where: { taskId, status: { not: 'COMPLETED' } } });
   }
 }

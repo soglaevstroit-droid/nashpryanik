@@ -228,3 +228,27 @@ test('rejects invalid transition', async () => {
 
   await assert.rejects(() => service.startStep(worker, 'step-1'), BadRequestException);
 });
+
+test('worker step actions require an active shift before reading the step', async () => {
+  let stepRead = false;
+  const repository = createRepository([createStep()]);
+  const originalFindById = repository.findById.bind(repository);
+  repository.findById = async (...args) => {
+    stepRead = true;
+    return originalFindById(...args);
+  };
+  const service = new TaskStepService(
+    repository,
+    createEventService([]),
+    createTaskService(),
+    undefined,
+    {
+      assertActiveShift: async () => {
+        throw new Error('ACTIVE_SHIFT_REQUIRED');
+      },
+    } as never,
+  );
+
+  await assert.rejects(service.startStep(worker, 'step-1'), /ACTIVE_SHIFT_REQUIRED/);
+  assert.equal(stepRead, false);
+});

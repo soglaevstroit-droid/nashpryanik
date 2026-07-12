@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, statfs } from 'node:fs/promises';
 import { delimiter, resolve } from 'node:path';
 import { clearTimeout, setTimeout } from 'node:timers';
+import { saveReport } from './lib/report.mjs';
 
 const PRODUCTION_HOST = '176.125.242.120';
 const PREFERRED_SSH_HOST = 'stroit-server';
@@ -19,6 +20,10 @@ const allowedArguments = new Set(['--json']);
 const jsonMode = process.argv.slice(2).includes('--json');
 
 const result = {
+  success: false,
+  startedAt: new Date().toISOString(),
+  finishedAt: null,
+  durationMs: 0,
   ready: false,
   critical: [],
   warnings: [],
@@ -26,7 +31,9 @@ const result = {
     checksAreReadOnly: true,
     pgDumpExecuted: false,
   },
+  steps: [],
 };
+const startedMs = Date.now();
 
 try {
   for (const argument of process.argv.slice(2)) {
@@ -53,6 +60,10 @@ try {
 }
 
 result.ready = result.critical.length === 0;
+result.success = result.ready;
+result.finishedAt = new Date().toISOString();
+result.durationMs = Date.now() - startedMs;
+await saveReport(result, 'backup-check');
 if (jsonMode) {
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } else {

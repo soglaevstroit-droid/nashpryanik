@@ -1,9 +1,9 @@
-/* global Headers, File, URL, crypto, navigator, sessionStorage */
+/* global CameraUtils, Headers, File, PhotoSlider, URL, crypto, navigator, sessionStorage */
 
 const authTokenStorageKey = 'stroit.demo.accessToken';
 const legacyShiftStorageKey = 'stroit.demo.shiftOpen';
 const legacyShiftStateStorageKey = 'stroit.demo.shiftState';
-const workerEmail = 'ilya.demo@stroit.local';
+const workerEmail = 'ilya';
 
 const steps = [
   {
@@ -38,11 +38,18 @@ const taskFlowState = {
   helpRequests: [],
 };
 
-const coinBalanceStorageKey = 'stroit.demo.coinBalance';
-const defaultCoinBalance = 12540;
 let accessToken = sessionStorage.getItem(authTokenStorageKey);
 let currentUser = null;
 let currentShift = null;
+let workerSummary = null;
+let shiftStateResolved = false;
+let lastTaskLockedMessageAt = 0;
+let coinTicker = null;
+let historyCursor = null;
+let selectedTaskId = null;
+let selectedTask = null;
+let taskListScrollY = 0;
+let taskDetailActionPending = false;
 let pendingCameraMode = null;
 let cameraAttempt = {
   mode: null,
@@ -51,6 +58,8 @@ let cameraAttempt = {
   blob: null,
   previewUrl: null,
   isSubmitting: false,
+  facingMode: 'environment',
+  cameraCount: 0,
 };
 
 const taskStatusView = {
@@ -131,7 +140,8 @@ const elements = {
   userInfo: document.querySelector('#userInfo'),
   totalCoinBalance: document.querySelector('#totalCoinBalance'),
   workerShiftStatus: document.querySelector('#workerShiftStatus'),
-  shiftEarnedAmount: document.querySelector('#shiftEarnedAmount'),
+  approvedCoinAmount: document.querySelector('#approvedCoinAmount'),
+  pendingCoinAmount: document.querySelector('#pendingCoinAmount'),
   startWorkButton: document.querySelector('#startWorkButton'),
   modalLayer: document.querySelector('#modalLayer'),
   messagePanel: document.querySelector('#messagePanel'),
@@ -139,6 +149,9 @@ const elements = {
   taskProgressLine: document.querySelector('#taskProgressLine'),
   taskProgressPercent: document.querySelector('#taskProgressPercent'),
   taskMeta: document.querySelector('#taskMeta'),
+  taskTitle: document.querySelector('#taskTitle'),
+  taskObject: document.querySelector('#taskObject'),
+  stepsList: document.querySelector('#stepsList'),
   taskStatusControls: Array.from(document.querySelectorAll('[data-task-status-control]')),
   homeTaskCards: Array.from(document.querySelectorAll('[data-home-task-card]')),
   homeTaskStatuses: Array.from(document.querySelectorAll('[data-home-task-status]')),
@@ -162,6 +175,7 @@ const elements = {
   shiftCameraRetakeButton: document.querySelector('#shiftCameraRetakeButton'),
   shiftCameraCaptureButton: document.querySelector('#shiftCameraCaptureButton'),
   shiftCameraConfirmButton: document.querySelector('#shiftCameraConfirmButton'),
+  shiftCameraFlipButton: document.querySelector('#shiftCameraFlipButton'),
   afterPhotoPlaceholder: document.querySelector('#afterPhotoPlaceholder'),
   afterPhotoResult: document.getElementById(`afterPhoto${String.fromCharCode(77, 111, 99, 107)}`),
   sendToManagerButton: document.querySelector('#sendToManagerButton'),
@@ -180,7 +194,26 @@ const elements = {
     document.querySelector('#stepConnectRow'),
     document.querySelector('#stepTestRow'),
   ],
+  workerObjectsList: document.querySelector('#workerObjectsList'),
+  historyList: document.querySelector('#historyList'),
+  historyMoreButton: document.querySelector('#historyMoreButton'),
+  taskDescription: document.querySelector('#taskDescription'),
+  taskAssignee: document.querySelector('#taskAssignee'),
+  taskPhotos: document.querySelector('#taskPhotos'),
 };
+
+const photoSlider = new PhotoSlider({
+  loadPhoto: async (id) => {
+    const response = await apiFetch(`/api/v1/artifacts/${id}`);
+    if (!response.ok) throw new Error('Photo is unavailable');
+    return response.blob();
+  },
+  viewer: {
+    root: document.querySelector('#photoViewer'),
+    image: document.querySelector('#photoViewerImage'),
+  },
+  onLockedAttempt: notifyTaskLocked,
+});
 
 const views = {
   myWork: document.querySelector('#myWorkView'),
@@ -190,6 +223,7 @@ const views = {
   stagePhoto: document.querySelector('#stagePhotoView'),
   resultConfirmation: document.querySelector('#resultConfirmationView'),
   workSent: document.querySelector('#workSentView'),
+  history: document.querySelector('#historyView'),
 };
 
 const modals = {
@@ -206,8 +240,9 @@ elements.loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   await login();
 });
+elements.historyMoreButton.addEventListener('click', () => loadHistory(false));
 
-document.addEventListener('click', (event) => {
+document.addEventListener('click', async (event) => {
   const viewButton = event.target.closest('[data-open-view]');
   const modalButton = event.target.closest('[data-open-modal]');
   const closeButton = event.target.closest('[data-close-modal]');
@@ -228,6 +263,59 @@ document.addEventListener('click', (event) => {
   const retakeCameraButton = event.target.closest('[data-retake-camera]');
   const confirmCameraButton = event.target.closest('[data-confirm-camera]');
   const cancelCameraButton = event.target.closest('[data-cancel-camera]');
+  const flipCameraButton = event.target.closest('[data-flip-camera]');
+  const taskActionButton = event.target.closest('[data-worker-task-action]');
+  const taskCard = event.target.closest('[data-worker-task-id]');
+  const backToTasksButton = event.target.closest('[data-back-to-tasks]');
+  const detailTaskAction = event.target.closest('[data-detail-task-action]');
+  const detailStepAction = event.target.closest('[data-detail-step-action]');
+  const uploadPhotoButton = event.target.closest('[data-upload-detail-photo]');
+  const reloadTaskDetailButton = event.target.closest('[data-reload-task-detail]');
+  if (reloadTaskDetailButton) {
+    renderTaskDetailLoading();
+    await reloadTaskDetails();
+    return;
+  }
+
+  if (backToTasksButton) {
+    openView('myWork', { preserveScroll: true });
+    window.scrollTo({ top: taskListScrollY, behavior: 'instant' });
+    return;
+  }
+
+  if (detailTaskAction) {
+    await runDetailAction('task', detailTaskAction.dataset.detailTaskAction, selectedTaskId);
+    return;
+  }
+
+  if (detailStepAction) {
+    await runDetailAction(
+      'step',
+      detailStepAction.dataset.detailStepAction,
+      detailStepAction.dataset.stepId,
+    );
+    return;
+  }
+
+  if (uploadPhotoButton) {
+    openDetailPhotoPicker(uploadPhotoButton.dataset.stepId || null);
+    return;
+  }
+
+  if (taskActionButton) {
+    if (isTaskAccessLocked()) return notifyTaskLocked();
+    await runWorkerTaskAction(
+      taskActionButton.dataset.workerTaskAction,
+      taskActionButton.dataset.taskId,
+    );
+    return;
+  }
+
+  if (taskCard && !event.target.closest('[data-photo-slider]')) {
+    if (isTaskAccessLocked()) return notifyTaskLocked();
+    await openTaskDetails(taskCard.dataset.workerTaskId);
+    return;
+  }
 
   if (viewButton) {
     openView(viewButton.dataset.openView);
@@ -281,6 +369,10 @@ document.addEventListener('click', (event) => {
     cancelCameraAttempt();
   }
 
+  if (flipCameraButton) {
+    await flipCamera();
+  }
+
   if (confirmTaskStatusButton) {
     if (confirmTaskStatusButton.disabled) {
       return;
@@ -317,6 +409,15 @@ document.addEventListener('click', (event) => {
   if (sendHelpRequestButton) {
     sendHelpRequest();
   }
+});
+
+document.addEventListener('keydown', async (event) => {
+  if (!['Enter', ' '].includes(event.key)) return;
+  const taskCard = event.target.closest('[data-worker-task-id]');
+  if (!taskCard) return;
+  event.preventDefault();
+  if (isTaskAccessLocked()) return notifyTaskLocked();
+  await openTaskDetails(taskCard.dataset.workerTaskId);
 });
 
 elements.pauseReasonInput.addEventListener('input', () => {
@@ -387,22 +488,24 @@ async function showWorkspace() {
     return false;
   }
 
-  elements.userInfo.textContent = currentUser?.name ?? 'Илья';
+  elements.userInfo.textContent = currentUser?.name ?? 'Илья Н.';
   elements.loginScreen.hidden = true;
   elements.loginScreen.classList.remove('is-active');
   elements.workspaceScreen.hidden = false;
-  renderCoinBalance();
   renderTask();
+  await loadWorkerObjects();
   openView('myWork');
   return true;
 }
 
-function openView(name) {
-  const taskFlowViews = ['taskDetail', 'currentStep', 'stagePhoto', 'resultConfirmation', 'workSent'];
-
-  if (name === 'taskDetail') {
-    renderTask();
-  }
+function openView(name, options = {}) {
+  const taskFlowViews = [
+    'taskDetail',
+    'currentStep',
+    'stagePhoto',
+    'resultConfirmation',
+    'workSent',
+  ];
 
   if (name === 'currentStep') {
     renderCurrentStep();
@@ -411,6 +514,7 @@ function openView(name) {
   if (name === 'stagePhoto') {
     renderStagePhoto();
   }
+  if (name === 'history') void loadHistory(true);
 
   for (const [viewName, view] of Object.entries(views)) {
     view.classList.toggle('is-active', viewName === name);
@@ -419,7 +523,7 @@ function openView(name) {
   elements.workspaceScreen.classList.toggle('is-task-flow', taskFlowViews.includes(name));
   resetCarousels(views[name]);
   closeModal();
-  window.scrollTo({ top: 0, behavior: 'instant' });
+  if (!options.preserveScroll) window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
 function openModal(name) {
@@ -472,35 +576,118 @@ function isShiftOpen() {
   return currentShift?.status === 'ACTIVE';
 }
 
+function isTaskAccessLocked() {
+  return !shiftStateResolved || !isShiftOpen();
+}
+
+function notifyTaskLocked() {
+  const now = Date.now();
+  if (now - lastTaskLockedMessageAt < 1_200) return;
+  lastTaskLockedMessageAt = now;
+  showMessage('Откройте смену, чтобы перейти к задаче');
+}
+
+function applyTaskAccessState() {
+  const locked = isTaskAccessLocked();
+  photoSlider.setLocked(elements.workerObjectsList, locked);
+  for (const card of elements.workerObjectsList.querySelectorAll('[data-worker-task-id]')) {
+    card.classList.toggle('is-task-locked', locked);
+    card.setAttribute('aria-disabled', String(locked));
+    card.setAttribute(
+      'aria-label',
+      locked
+        ? `${card.querySelector('h3')?.textContent ?? 'Задача'}. Задача заблокирована до открытия смены`
+        : (card.querySelector('h3')?.textContent ?? 'Открыть задачу'),
+    );
+    card.setAttribute('role', locked ? 'group' : 'button');
+    card.tabIndex = locked ? -1 : 0;
+  }
+  if (locked) {
+    photoSlider.close();
+    if (elements.workspaceScreen.classList.contains('is-task-flow')) {
+      selectedTaskId = null;
+      selectedTask = null;
+      openView('myWork', { preserveScroll: true });
+    }
+  }
+}
+
 function renderShiftState() {
   const isOpen = isShiftOpen();
-
-  elements.workerShiftStatus.textContent = isOpen ? 'Работает' : 'Отдыхает';
+  const status = workerSummary?.shift?.status ?? 'NOT_STARTED';
+  elements.workerShiftStatus.textContent = status === 'ACTIVE' ? 'Работает' : 'Отдыхает';
   elements.startWorkButton.textContent = isOpen ? 'ЗАКОНЧИТЬ РАБОТУ' : 'НАЧАТЬ РАБОТУ';
   elements.startWorkButton.classList.toggle('is-working', isOpen);
-  elements.shiftEarnedAmount.textContent = formatShiftCoins(0);
+  const approved = workerSummary?.coins?.approvedBalanceCoinUnits ?? 0;
+  const pending = workerSummary?.coins?.pendingCoinUnits ?? 0;
+  elements.approvedCoinAmount.textContent = '0,00';
+  elements.approvedCoinAmount.classList.toggle('is-live', isOpen);
+  elements.pendingCoinAmount.textContent = formatCoinUnits(pending);
+  elements.totalCoinBalance.textContent = formatApprovedCoinUnits(approved);
+  if (isOpen) startCoinTicker();
+  else stopCoinTicker();
+  applyTaskAccessState();
 }
 
 async function refreshShiftState() {
   try {
-    const response = await apiFetch('/api/v1/work-shifts/current');
+    const response = await apiFetch('/api/v1/worker/summary');
     const body = await readResponseBody(response);
 
     if (!response.ok) {
+      shiftStateResolved = false;
+      currentShift = null;
+      applyTaskAccessState();
       await handleApiFailure(response.status, body, {
         fallbackMessage: 'Не удалось получить состояние смены.',
       });
       return false;
     }
 
-    currentShift = body?.shift ?? null;
+    workerSummary = body;
+    currentShift = body?.shift?.status === 'ACTIVE' ? body.shift : null;
+    shiftStateResolved = true;
     renderShiftState();
     return true;
   } catch {
+    shiftStateResolved = false;
+    currentShift = null;
+    applyTaskAccessState();
     showMessage('Backend недоступен. Проверьте соединение и повторите попытку.');
     return false;
   }
 }
+
+function startCoinTicker() {
+  stopCoinTicker();
+  renderOnlineCoins();
+  coinTicker = window.setInterval(renderOnlineCoins, 1_000);
+}
+
+function stopCoinTicker() {
+  if (coinTicker !== null) window.clearInterval(coinTicker);
+  coinTicker = null;
+  elements.approvedCoinAmount.textContent = '0,00';
+  elements.approvedCoinAmount.classList.remove('is-live');
+}
+
+function renderOnlineCoins() {
+  if (!currentShift?.startedAt || !workerSummary?.policy) return stopCoinTicker();
+  const durationSeconds = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(currentShift.startedAt).getTime()) / 1_000),
+  );
+  const units = Math.min(
+    durationSeconds * workerSummary.policy.coinUnitsPerSecond,
+    workerSummary.policy.dailyStandardLimitCoinUnits,
+  );
+  elements.approvedCoinAmount.textContent = formatCoinUnits(units);
+  elements.approvedCoinAmount.classList.add('is-live');
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && accessToken) void refreshShiftState();
+});
 
 async function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers ?? {});
@@ -515,6 +702,335 @@ async function apiFetch(url, options = {}) {
   });
 
   return response;
+}
+
+async function loadWorkerObjects() {
+  elements.workerObjectsList.innerHTML = '<p>Загружаем задачи…</p>';
+  try {
+    const response = await apiFetch('/api/v1/worker/objects');
+    const groups = await readResponseBody(response);
+    if (!response.ok) throw new Error(getApiMessage(groups));
+    const total = groups.reduce((sum, group) => sum + group.tasks.length, 0);
+    if (total === 0) {
+      elements.workerObjectsList.innerHTML =
+        '<div class="emptyObject"><p>У вас пока нет назначенных задач</p></div>';
+      return;
+    }
+    elements.workerObjectsList.innerHTML = groups
+      .flatMap((group) => group.tasks.map((task) => renderTaskCard(task, group.object)))
+      .join('');
+    photoSlider.mount(elements.workerObjectsList);
+    applyTaskAccessState();
+  } catch {
+    elements.workerObjectsList.innerHTML =
+      '<div class="emptyObject"><p>Не удалось загрузить задачи. Повторить</p><button class="secondaryButton" type="button" data-reload-worker-tasks>Повторить</button></div>';
+    elements.workerObjectsList
+      .querySelector('[data-reload-worker-tasks]')
+      ?.addEventListener('click', loadWorkerObjects);
+  }
+}
+
+function renderTaskCard(task, object) {
+  const completed = task.steps.filter((step) => step.status === 'COMPLETED').length;
+  const percent = task.steps.length ? Math.round((completed / task.steps.length) * 100) : 0;
+  const gallery = PhotoSlider.render(task.photos, {
+    id: `task-list-${task.id}`,
+    emptyText: 'Фотографий пока нет',
+    locked: isTaskAccessLocked(),
+  });
+  const location = task.location || object.name;
+  return `<article class="taskCard taskFeedCard ${taskCardStatusClass(task.status)}" data-worker-task-id="${task.id}" role="button" tabindex="0"><div class="taskFeedCardHeader"><h3>${escapeHtml(task.title)}</h3></div>${gallery}<p class="taskLocation">${escapeHtml(location)}</p><div class="taskProgressBlock"><div class="taskProgressLine"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div><small>${completed} из ${task.steps.length} этапов выполнено</small></div></article>`;
+}
+
+function taskCardStatusClass(status) {
+  return (
+    {
+      ASSIGNED: 'is-ready',
+      ACCEPTED: 'is-accepted',
+      IN_PROGRESS: 'is-working',
+      ON_REVIEW: 'is-review',
+      COMPLETED: 'is-accepted',
+      CANCELLED: 'is-paused',
+    }[status] ?? ''
+  );
+}
+
+async function runWorkerTaskAction(action, taskId) {
+  if (isTaskAccessLocked()) return notifyTaskLocked();
+  const endpoint = action === 'accept' ? 'accept' : 'start';
+  const response = await apiFetch(`/api/v1/tasks/${taskId}/${endpoint}`, { method: 'PATCH' });
+  const body = await readResponseBody(response);
+  if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось изменить задачу');
+  await loadWorkerObjects();
+  showMessage(action === 'accept' ? 'Задача принята' : 'Задача начата');
+}
+
+async function openTaskDetails(taskId) {
+  if (isTaskAccessLocked()) return notifyTaskLocked();
+  selectedTaskId = taskId;
+  selectedTask = null;
+  taskListScrollY = window.scrollY;
+  renderTaskDetailLoading();
+  openView('taskDetail');
+  await reloadTaskDetails();
+}
+
+async function reloadTaskDetails() {
+  if (isTaskAccessLocked()) {
+    openView('myWork', { preserveScroll: true });
+    return notifyTaskLocked();
+  }
+  if (!selectedTaskId) return;
+  try {
+    const response = await apiFetch(`/api/v1/worker/tasks/${selectedTaskId}`);
+    const body = await readResponseBody(response);
+    if (!response.ok) {
+      renderTaskDetailError(
+        response.status === 404
+          ? 'Задача не найдена или недоступна.'
+          : getApiMessage(body) || 'Не удалось загрузить задачу.',
+      );
+      return;
+    }
+    selectedTask = body;
+    renderSelectedTask();
+    await hydrateDetailPhotos();
+  } catch {
+    renderTaskDetailError('Не удалось загрузить задачу. Проверьте соединение и повторите попытку.');
+  }
+}
+
+function renderTaskDetailLoading() {
+  elements.taskTitle.textContent = 'Загружаем задачу…';
+  elements.taskObject.textContent = '';
+  elements.taskDescription.textContent = '';
+  elements.taskAssignee.textContent = '';
+  elements.taskPhotos.innerHTML = '<p>Загружаем фотографии…</p>';
+  elements.stepsList.innerHTML = '<p>Загружаем этапы…</p>';
+}
+
+function renderTaskDetailError(message) {
+  elements.taskTitle.textContent = 'Задача недоступна';
+  elements.taskObject.textContent = '';
+  elements.taskDescription.textContent = message;
+  elements.taskAssignee.textContent = '';
+  elements.taskPhotos.innerHTML = '<p>Фотографий нет</p>';
+  elements.stepsList.innerHTML =
+    '<button class="secondaryButton" type="button" data-reload-task-detail>Повторить</button>';
+}
+
+function renderSelectedTask() {
+  if (!selectedTask) return;
+  photoSlider.clear(views.taskDetail);
+  elements.taskTitle.textContent = selectedTask.title;
+  elements.taskObject.textContent = selectedTask.object?.name ?? 'Объект не указан';
+  elements.taskDescription.textContent = selectedTask.description || 'Описание не указано';
+  elements.taskAssignee.textContent = `Исполнитель: ${selectedTask.assignee?.name ?? 'не назначен'}`;
+  elements.taskMeta.hidden = false;
+  elements.taskMeta.textContent = taskStatusLabel(selectedTask.status);
+  renderSelectedTaskControl();
+  elements.taskPhotos.innerHTML = PhotoSlider.render(selectedTask.photos, {
+    id: `task-${selectedTask.id}`,
+    emptyText: 'У задачи пока нет фотографий',
+  });
+  elements.stepsList.innerHTML = selectedTask.steps.length
+    ? selectedTask.steps.map(renderTaskStep).join('')
+    : '<div class="emptyObject"><p>У задачи нет этапов</p></div>';
+}
+
+function renderSelectedTaskControl() {
+  const control = views.taskDetail.querySelector('[data-task-status-control]');
+  const action =
+    selectedTask.status === 'ASSIGNED'
+      ? 'accept'
+      : selectedTask.status === 'ACCEPTED'
+        ? 'start'
+        : selectedTask.status === 'IN_PROGRESS'
+          ? 'complete'
+          : null;
+  control.disabled = taskDetailActionPending || !action;
+  control.dataset.detailTaskAction = action ?? '';
+  control.querySelector('b').textContent = action
+    ? { accept: 'Принять задачу', start: 'Начать задачу', complete: 'Завершить задачу' }[action]
+    : taskStatusLabel(selectedTask.status);
+  control.querySelector('small').textContent = action
+    ? 'Действие будет сохранено в истории.'
+    : 'Для текущего статуса действий нет.';
+}
+
+function renderTaskStep(step, index) {
+  const taskAllowsStepActions = selectedTask.status === 'IN_PROGRESS';
+  const action = taskAllowsStepActions
+    ? step.status === 'CREATED' || step.status === 'REOPENED'
+      ? 'start'
+      : step.status === 'IN_PROGRESS'
+        ? 'complete'
+        : null
+    : null;
+  const actionLabel = action === 'start' ? 'Начать этап' : 'Завершить этап';
+  const photos = PhotoSlider.render(step.photos, {
+    id: `step-${step.id}`,
+    emptyText: 'Фотографий этапа нет',
+  });
+  if (action || step.status === 'IN_PROGRESS') {
+    return `<article class="stepTimelineCurrent is-current"><span class="stepNumber">${index + 1}</span><div class="currentStepBubble"><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description || 'Описание не указано')}</p><em>${taskStepStatusLabel(step.status)}</em>${photos}${action ? `<button type="button" data-detail-step-action="${action}" data-step-id="${step.id}" ${taskDetailActionPending ? 'disabled' : ''}>${actionLabel}</button>` : ''}${step.status === 'IN_PROGRESS' ? `<button class="linkButton" type="button" data-upload-detail-photo data-step-id="${step.id}" ${taskDetailActionPending ? 'disabled' : ''}>Добавить фото</button>` : ''}</div></article>`;
+  }
+  return `<article class="stepTimelineFuture ${step.status === 'COMPLETED' ? 'is-complete' : ''}"><span class="${step.status === 'COMPLETED' ? 'stepCompleteMark' : 'stageLock'}" aria-hidden="true">${step.status === 'COMPLETED' ? '✓' : ''}</span><div><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description || 'Описание не указано')}</p>${photos}</div><em>${taskStepStatusLabel(step.status)}</em><i aria-hidden="true">›</i></article>`;
+}
+
+async function hydrateDetailPhotos() {
+  photoSlider.mount(views.taskDetail);
+}
+
+async function runDetailAction(kind, action, id) {
+  if (isTaskAccessLocked()) return notifyTaskLocked();
+  if (taskDetailActionPending || !action || !id) return;
+  taskDetailActionPending = true;
+  renderSelectedTaskControl();
+  try {
+    const base = kind === 'task' ? `/api/v1/tasks/${id}` : `/api/v1/task-steps/${id}`;
+    const response = await apiFetch(`${base}/${action}`, { method: 'PATCH' });
+    const body = await readResponseBody(response);
+    if (!response.ok) return showMessage(getApiMessage(body) || 'Действие сейчас недоступно.');
+    await Promise.all([reloadTaskDetails(), loadWorkerObjects(), loadHistory(true)]);
+    showMessage('Статус обновлён');
+  } catch {
+    showMessage('Не удалось выполнить действие. Проверьте соединение и повторите попытку.');
+  } finally {
+    taskDetailActionPending = false;
+    if (selectedTask) renderSelectedTaskControl();
+  }
+}
+
+function openDetailPhotoPicker(stepId) {
+  if (isTaskAccessLocked()) return notifyTaskLocked();
+  if (taskDetailActionPending || !selectedTaskId) return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png,image/webp';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    taskDetailActionPending = true;
+    const form = new FormData();
+    form.append('file', file);
+    form.append('taskId', selectedTaskId);
+    if (stepId) form.append('taskStepId', stepId);
+    try {
+      const response = await apiFetch('/api/v1/artifacts/photos', { method: 'POST', body: form });
+      const body = await readResponseBody(response);
+      if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось загрузить фото.');
+      await Promise.all([reloadTaskDetails(), loadHistory(true)]);
+      showMessage('Фото добавлено');
+    } catch {
+      showMessage('Не удалось загрузить фото. Проверьте соединение и повторите попытку.');
+    } finally {
+      taskDetailActionPending = false;
+    }
+  });
+  input.click();
+}
+
+function taskStepStatusLabel(status) {
+  return (
+    { CREATED: 'Ожидает', IN_PROGRESS: 'В работе', COMPLETED: 'Выполнен', CANCELLED: 'Отменён' }[
+      status
+    ] ?? status
+  );
+}
+
+async function loadHistory(reset) {
+  if (reset) {
+    historyCursor = null;
+    elements.historyList.innerHTML = '<p>Загружаем историю…</p>';
+  }
+  try {
+    const url = `/api/v1/history?limit=20${historyCursor ? `&cursor=${encodeURIComponent(historyCursor)}` : ''}`;
+    const response = await apiFetch(url);
+    const body = await readResponseBody(response);
+    if (!response.ok) throw new Error();
+    if (reset && body.items.length === 0)
+      elements.historyList.innerHTML =
+        '<div class="emptyObject"><p>История действий пока пуста</p></div>';
+    else renderHistoryItems(body.items, reset);
+    historyCursor = body.nextCursor;
+    elements.historyMoreButton.hidden = !body.hasMore;
+  } catch {
+    elements.historyList.innerHTML =
+      '<div class="emptyObject"><p>Не удалось загрузить историю. Повторить</p></div>';
+  }
+}
+
+function renderHistoryItems(items, reset) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = new Date(item.createdAt).toLocaleDateString('ru-RU');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  const html = [...groups.entries()]
+    .map(
+      ([date, events]) =>
+        `<section class="objectBlock"><h2>${historyDateLabel(events[0].createdAt, date)}</h2>${events.map(renderHistoryEvent).join('')}</section>`,
+    )
+    .join('');
+  if (reset) elements.historyList.innerHTML = html;
+  else elements.historyList.insertAdjacentHTML('beforeend', html);
+  photoSlider.mount(elements.historyList);
+}
+
+function renderHistoryEvent(event) {
+  const metadata = event.metadata ?? {};
+  const description =
+    metadata.stepTitle ?? metadata.taskTitle ?? metadata.objectName ?? 'Действие сотрудника';
+  const photos = PhotoSlider.render(event.artifacts, {
+    id: `history-${event.id}`,
+    showEmpty: false,
+  });
+  const time = new Date(event.createdAt).toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return `<article class="taskCard historyEventCard"><h3>${eventLabel(event.type)}</h3><p class="taskSummary">${escapeHtml(description)}</p>${photos}<time datetime="${event.createdAt}">${time}</time>${metadata.objectName ? `<p>${escapeHtml(metadata.objectName)}</p>` : ''}${metadata.taskTitle ? `<p>«${escapeHtml(metadata.taskTitle)}»</p>` : ''}${metadata.stepTitle ? `<p>Этап: ${escapeHtml(metadata.stepTitle)}</p>` : ''}</article>`;
+}
+
+function historyDateLabel(value, fallback) {
+  const date = new Date(value);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return `Сегодня, ${fallback}`;
+  if (date.toDateString() === yesterday.toDateString()) return `Вчера, ${fallback}`;
+  return fallback;
+}
+
+function eventLabel(type) {
+  return (
+    {
+      WORK_SHIFT_STARTED: 'Открыл смену',
+      WORK_SHIFT_FINISHED: 'Закрыл смену',
+      TASK_ACCEPTED: 'Принял задачу',
+      TASK_STARTED: 'Начал задачу',
+      TASK_COMPLETED: 'Завершил задачу',
+      STEP_STARTED: 'Начал этап',
+      STEP_COMPLETED: 'Завершил этап',
+      PHOTO_UPLOADED: 'Добавил фотографию',
+    }[type] ?? 'Выполнил действие'
+  );
+}
+
+function taskStatusLabel(status) {
+  return (
+    { IN_PROGRESS: 'В работе', ACCEPTED: 'Принята', ON_REVIEW: 'На проверке' }[status] ?? status
+  );
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 async function readResponseBody(response) {
@@ -569,7 +1085,10 @@ async function handleApiFailure(status, body, options = {}) {
     return;
   }
 
-  showCameraOrToastError(options.fallbackMessage ?? 'Не удалось сохранить фотографию. Проверьте соединение и повторите попытку.');
+  showCameraOrToastError(
+    options.fallbackMessage ??
+      'Не удалось сохранить фотографию. Проверьте соединение и повторите попытку.',
+  );
 }
 
 function handleUnauthorized() {
@@ -579,6 +1098,7 @@ function handleUnauthorized() {
   closeModal();
   currentUser = null;
   currentShift = null;
+  shiftStateResolved = false;
   elements.workspaceScreen.hidden = true;
   elements.loginScreen.hidden = false;
   elements.loginScreen.classList.add('is-active');
@@ -628,6 +1148,8 @@ async function openShiftCamera(mode) {
     blob: null,
     previewUrl: null,
     isSubmitting: false,
+    facingMode: 'environment',
+    cameraCount: 0,
   };
 
   elements.shiftCameraTitle.textContent =
@@ -642,7 +1164,7 @@ async function openShiftCamera(mode) {
   await startCameraStream();
 }
 
-async function startCameraStream() {
+async function startCameraStream(facingMode = cameraAttempt.facingMode || 'environment') {
   stopCameraStream();
   setCameraLoading('Открываем камеру...');
   elements.shiftCameraCaptureButton.disabled = true;
@@ -655,23 +1177,44 @@ async function startCameraStream() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: 'user',
+        facingMode: { ideal: facingMode },
       },
       audio: false,
     });
 
     cameraAttempt.stream = stream;
+    cameraAttempt.facingMode = facingMode;
     elements.shiftCameraVideo.srcObject = stream;
+    elements.shiftCameraVideo.classList.toggle('is-front-camera', facingMode === 'user');
     elements.shiftCameraVideo.hidden = false;
     elements.shiftCameraPreview.hidden = true;
     elements.shiftCameraState.hidden = true;
     elements.shiftCameraCaptureButton.disabled = false;
     await elements.shiftCameraVideo.play();
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices?.();
+      cameraAttempt.cameraCount = devices ? CameraUtils.countVideoInputs(devices) : 1;
+    } catch {
+      cameraAttempt.cameraCount = 1;
+    }
+    elements.shiftCameraFlipButton.hidden = cameraAttempt.cameraCount < 2;
+    return true;
   } catch {
     setCameraError(
       'Не удалось получить доступ к камере. Разрешите использование камеры в настройках браузера и повторите попытку.',
     );
+    return false;
   }
+}
+
+async function flipCamera() {
+  if (cameraAttempt.isSubmitting || cameraAttempt.cameraCount < 2) return;
+  const previousMode = cameraAttempt.facingMode;
+  const nextMode = CameraUtils.nextFacingMode(previousMode);
+  elements.shiftCameraFlipButton.disabled = true;
+  const switched = await startCameraStream(nextMode);
+  if (!switched) await startCameraStream(previousMode);
+  elements.shiftCameraFlipButton.disabled = false;
 }
 
 async function captureCameraPhoto() {
@@ -708,6 +1251,7 @@ async function captureCameraPhoto() {
   elements.shiftCameraVideo.hidden = true;
   elements.shiftCameraState.hidden = true;
   elements.shiftCameraCaptureButton.hidden = true;
+  elements.shiftCameraFlipButton.hidden = true;
   elements.shiftCameraRetakeButton.hidden = false;
   elements.shiftCameraConfirmButton.hidden = false;
   elements.shiftCameraConfirmButton.disabled = false;
@@ -727,6 +1271,7 @@ async function retakeCameraPhoto() {
   elements.shiftCameraRetakeButton.hidden = true;
   elements.shiftCameraConfirmButton.hidden = true;
   elements.shiftCameraConfirmButton.disabled = true;
+  elements.shiftCameraFlipButton.hidden = cameraAttempt.cameraCount < 2;
   await startCameraStream();
 }
 
@@ -802,6 +1347,7 @@ function resetCameraUi() {
   elements.shiftCameraConfirmButton.hidden = true;
   elements.shiftCameraConfirmButton.disabled = true;
   elements.shiftCameraCancelButton.disabled = false;
+  elements.shiftCameraFlipButton.hidden = true;
 }
 
 function setCameraLoading(message) {
@@ -831,18 +1377,17 @@ function cleanupCameraAttempt({ keepOperationId }) {
     blob: null,
     previewUrl: null,
     isSubmitting: false,
+    facingMode: keepOperationId ? cameraAttempt.facingMode : 'environment',
+    cameraCount: keepOperationId ? cameraAttempt.cameraCount : 0,
   };
 }
 
 function stopCameraStream() {
-  if (cameraAttempt.stream) {
-    for (const track of cameraAttempt.stream.getTracks()) {
-      track.stop();
-    }
-  }
+  CameraUtils.stopStream(cameraAttempt.stream);
 
   elements.shiftCameraVideo.pause();
   elements.shiftCameraVideo.srcObject = null;
+  elements.shiftCameraVideo.classList.remove('is-front-camera');
   cameraAttempt.stream = null;
 }
 
@@ -858,27 +1403,17 @@ function clearCameraPreview() {
   elements.shiftCameraCanvas.height = 0;
 }
 
-function readCoinBalance() {
-  const savedValue = localStorage.getItem(coinBalanceStorageKey);
-
-  if (savedValue === null) {
-    return defaultCoinBalance;
-  }
-
-  const savedBalance = Number(savedValue);
-  return Number.isFinite(savedBalance) ? savedBalance : defaultCoinBalance;
+function formatCoinUnits(units) {
+  const safeUnits = Number.isSafeInteger(units) ? units : 0;
+  const whole = Math.floor(safeUnits / 100);
+  const fraction = String(safeUnits % 100).padStart(2, '0');
+  return `${whole.toLocaleString('ru-RU').replace(/\u00a0/g, ' ')},${fraction}`;
 }
 
-function renderCoinBalance() {
-  elements.totalCoinBalance.textContent = formatWholeCoins(readCoinBalance());
-}
-
-function formatShiftCoins(value) {
-  return value.toFixed(2).replace('.', ',');
-}
-
-function formatWholeCoins(value) {
-  return Math.round(value).toLocaleString('ru-RU').replace(/\u00a0/g, ' ');
+function formatApprovedCoinUnits(units) {
+  return Math.floor((Number.isSafeInteger(units) ? units : 0) / 100)
+    .toLocaleString('ru-RU')
+    .replace(/\u00a0/g, ' ');
 }
 
 function completeCurrentStepAfterPhoto() {

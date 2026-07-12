@@ -1,12 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { TaskStepStatus } from '@prisma/client';
+import { Prisma, TaskStepStatus } from '@prisma/client';
 import { AuthUser } from '../auth/auth-user.js';
 import { EventService } from '../events/event.service.js';
 import { EventType } from '../events/event-types.js';
+import { DatabaseService } from '../database/database.service.js';
 import { TaskService } from '../tasks/task.service.js';
 import { CreateTaskStepDto } from './dto/create-task-step.dto.js';
 import { TaskStepRecord } from './task-step-record.js';
 import { TaskStepRepository } from './task-step.repository.js';
+import { ActiveShiftAccessService } from '../work-shifts/active-shift-access.service.js';
 
 const defaultStepListLimit = 200;
 
@@ -16,6 +18,8 @@ export class TaskStepService {
     private readonly repository: TaskStepRepository,
     private readonly events: EventService,
     private readonly tasks: TaskService,
+    private readonly database?: DatabaseService,
+    private readonly activeShiftAccess?: ActiveShiftAccessService,
   ) {}
 
   async createStep(
@@ -43,27 +47,40 @@ export class TaskStepService {
 
   async startStep(user: AuthUser, id: string): Promise<TaskStepRecord> {
     const step = await this.prepareTransition(user, id, ['CREATED', 'REOPENED'], 'start');
-    const updated = await this.repository.update(step.id, {
-      status: 'IN_PROGRESS',
-      startedAt: step.startedAt ?? new Date(),
-      completedAt: null,
+    const snapshot = await this.snapshot(user, step);
+    return this.transaction(async (client) => {
+      const current = await this.repository.findById(id, client);
+      if (!current || !['CREATED', 'REOPENED'].includes(current.status))
+        throw new BadRequestException('Task step was already started');
+      const updated = await this.repository.update(
+        step.id,
+        {
+          status: 'IN_PROGRESS',
+          startedAt: step.startedAt ?? new Date(),
+          completedAt: null,
+        },
+        client,
+      );
+      await this.createStepEvent(user, updated, 'STEP_STARTED', client, snapshot);
+      return updated;
     });
-
-    await this.createStepEvent(user, updated, 'STEP_STARTED');
-
-    return updated;
   }
 
   async completeStep(user: AuthUser, id: string): Promise<TaskStepRecord> {
     const step = await this.prepareTransition(user, id, ['IN_PROGRESS'], 'complete');
-    const updated = await this.repository.update(step.id, {
-      status: 'COMPLETED',
-      completedAt: new Date(),
+    const snapshot = await this.snapshot(user, step);
+    return this.transaction(async (client) => {
+      const current = await this.repository.findById(id, client);
+      if (!current || current.status !== 'IN_PROGRESS')
+        throw new BadRequestException('Task step was already completed');
+      const updated = await this.repository.update(
+        step.id,
+        { status: 'COMPLETED', completedAt: new Date() },
+        client,
+      );
+      await this.createStepEvent(user, updated, 'STEP_COMPLETED', client, snapshot);
+      return updated;
     });
-
-    await this.createStepEvent(user, updated, 'STEP_COMPLETED');
-
-    return updated;
   }
 
   async reopenStep(user: AuthUser, id: string): Promise<TaskStepRecord> {
@@ -118,6 +135,7 @@ export class TaskStepService {
     action: string,
   ): Promise<TaskStepRecord> {
     assertAuthUser(user);
+    await this.activeShiftAccess?.assertActiveShift(user);
 
     const step = await this.getStep(id);
 
@@ -132,21 +150,57 @@ export class TaskStepService {
     user: AuthUser,
     step: TaskStepRecord,
     type: EventType,
+    client?: Prisma.TransactionClient,
+    snapshot?: Record<string, unknown>,
   ): Promise<void> {
-    await this.events.createEvent({
-      type,
-      actorId: user.id,
-      entityType: 'task_step',
-      entityId: step.id,
-      payload: {
+    await this.events.createEvent(
+      {
+        type,
+        actorId: user.id,
+        entityType: 'task_step',
+        entityId: step.id,
         taskId: step.taskId,
-        status: step.status,
-        order: step.order,
+        taskStepId: step.id,
+        payload: {
+          taskId: step.taskId,
+          status: step.status,
+          order: step.order,
+        },
+        metadata: {
+          source: 'task-step-foundation',
+          ...(snapshot ?? {}),
+        },
       },
-      metadata: {
-        source: 'task-step-foundation',
-      },
+      client,
+    );
+  }
+
+  private async snapshot(user: AuthUser, step: TaskStepRecord): Promise<Record<string, unknown>> {
+    if (!this.database) return { stepTitle: step.title };
+    const task = await this.database.task.findUnique({
+      where: { id: step.taskId },
+      include: { object: true },
     });
+    if (user.role === 'WORKER' && task?.assigneeId !== user.id)
+      throw new BadRequestException('Worker can act only on assigned task');
+    const actor = await this.database.user.findUnique({
+      where: { id: user.id },
+      select: { name: true },
+    });
+    return {
+      actorName: actor?.name ?? null,
+      objectName: task?.object?.name ?? null,
+      taskTitle: task?.title ?? null,
+      stepTitle: step.title,
+    };
+  }
+
+  private transaction<T>(
+    action: (client: Prisma.TransactionClient | undefined) => Promise<T>,
+  ): Promise<T> {
+    return this.database
+      ? this.database.$transaction((client) => action(client))
+      : action(undefined);
   }
 }
 

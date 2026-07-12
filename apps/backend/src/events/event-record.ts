@@ -7,7 +7,12 @@ export interface EventRecord {
   actorId: string | null;
   entityType: string | null;
   entityId: string | null;
+  objectId?: string | null;
+  taskId?: string | null;
+  taskStepId?: string | null;
+  workShiftId?: string | null;
   payload: Prisma.JsonValue;
   metadata: Prisma.JsonValue | null;
+  artifacts?: Array<{ id: string; mimeType: string; originalFileName: string }>;
   createdAt: Date;
 }

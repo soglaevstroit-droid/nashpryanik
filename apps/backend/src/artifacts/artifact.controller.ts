@@ -22,7 +22,7 @@ import { ArtifactService } from './artifact.service.js';
 import { UploadedArtifactFile } from './uploaded-artifact-file.js';
 
 const uploadPhotoRoles = ['CREATOR', 'DIRECTOR', 'FOREMAN', 'WORKER'] as const;
-const readPhotoRoles = ['CREATOR', 'DIRECTOR', 'FOREMAN', 'WORKER', 'FINANCE'] as const;
+const readPhotoRoles = ['CREATOR', 'DIRECTOR', 'FOREMAN', 'WORKER', 'FINANCE', 'ANALYST'] as const;
 
 @Controller('api/v1')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -42,8 +42,8 @@ export class ArtifactController {
 
   @Get('artifacts/:id')
   @Roles(...readPhotoRoles)
-  async getPhoto(@Param('id') id: string): Promise<StreamableFile> {
-    const download = await this.artifacts.getPhoto(id);
+  async getPhoto(@CurrentUser() user: AuthUser, @Param('id') id: string): Promise<StreamableFile> {
+    const download = await this.artifacts.getPhoto(user, id);
 
     return new StreamableFile(download.stream, {
       type: download.artifact.mimeType,
@@ -53,13 +53,16 @@ export class ArtifactController {
 
   @Get('events/:eventId/artifacts')
   @Roles(...readPhotoRoles)
-  listPhotos(@Param('eventId') eventId: string): Promise<ArtifactRecord[]> {
-    return this.artifacts.listPhotos(eventId);
+  listPhotos(
+    @CurrentUser() user: AuthUser,
+    @Param('eventId') eventId: string,
+  ): Promise<ArtifactRecord[]> {
+    return this.artifacts.listPhotos(user, eventId);
   }
 
   @Delete('artifacts/:id')
   @Roles(...uploadPhotoRoles)
-  deletePhoto(@Param('id') id: string): Promise<ArtifactRecord> {
-    return this.artifacts.deletePhoto(id);
+  deletePhoto(@CurrentUser() user: AuthUser, @Param('id') id: string): Promise<ArtifactRecord> {
+    return this.artifacts.deletePhoto(user, id);
   }
 }

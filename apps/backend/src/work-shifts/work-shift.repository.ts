@@ -7,12 +7,15 @@ import { WorkShiftRecord } from './work-shift-record.js';
 export class WorkShiftRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async create(data: {
-    id?: string;
-    userId: string;
-    processId: string;
-    startedAt: Date;
-  }, client: Prisma.TransactionClient = this.database): Promise<WorkShiftRecord> {
+  async create(
+    data: {
+      id?: string;
+      userId: string;
+      processId: string;
+      startedAt: Date;
+    },
+    client: Prisma.TransactionClient = this.database,
+  ): Promise<WorkShiftRecord> {
     const shift = await client.workShift.create({
       data: {
         id: data.id,

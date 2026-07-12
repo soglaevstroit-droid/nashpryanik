@@ -84,9 +84,24 @@ enum Role {
   CREATOR
   DIRECTOR
   FINANCE
+  ANALYST
   FOREMAN
   WORKER
   PARTNER
+}
+
+enum ShiftAccrualStatus {
+  ACTIVE
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum OvertimeDecision {
+  PENDING
+  APPROVED
+  ADJUSTED
+  REJECTED
 }
 
 enum WorkShiftStatus {
@@ -134,20 +149,43 @@ enum ArtifactSource {
 }
 
 model Event {
-  id         String    @id @default(uuid())
-  type       EventType
-  actorId    String?
-  entityType String?
-  entityId   String?
-  payload    Json
-  metadata   Json?
-  createdAt  DateTime  @default(now())
+  id             String     @id @default(uuid())
+  type           EventType
+  actorId        String?
+  entityType     String?
+  entityId       String?
+  objectId       String?
+  taskId         String?
+  taskStepId     String?
+  workShiftId    String?
+  idempotencyKey String?    @unique
+  payload        Json
+  metadata       Json?
+  createdAt      DateTime   @default(now())
+  artifacts      Artifact[]
 
   @@index([type])
   @@index([actorId])
+  @@index([actorId, createdAt, id])
+  @@index([taskId])
+  @@index([workShiftId])
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("events")
+}
+
+model ConstructionObject {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks     Task[]
+
+  @@index([isActive, sortOrder])
+  @@map("construction_objects")
 }
 
 model Process {
@@ -168,14 +206,15 @@ model Process {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  role         Role
-  name         String?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                      String   @id @default(uuid())
+  email                   String   @unique
+  passwordHash            String
+  role                    Role
+  name                    String?
+  isActive                Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  openingBalanceCoinUnits Int      @default(0)
 
   @@index([role])
   @@index([isActive])
@@ -183,15 +222,16 @@ model User {
 }
 
 model WorkShift {
-  id         String          @id @default(uuid())
+  id         String           @id @default(uuid())
   userId     String
   processId  String?
-  status     WorkShiftStatus @default(ACTIVE)
+  status     WorkShiftStatus  @default(ACTIVE)
   startedAt  DateTime
   finishedAt DateTime?
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
   photos     WorkShiftPhoto[]
+  accrual    ShiftAccrual?
 
   @@index([userId])
   @@index([status])
@@ -200,23 +240,58 @@ model WorkShift {
   @@map("work_shifts")
 }
 
+model ShiftAccrual {
+  id                          String             @id @default(uuid())
+  workShiftId                 String             @unique
+  workerId                    String
+  status                      ShiftAccrualStatus @default(ACTIVE)
+  durationSeconds             Int                @default(0)
+  standardDurationSeconds     Int                @default(0)
+  overtimeSeconds             Int                @default(0)
+  calculatedStandardCoinUnits Int                @default(0)
+  standardCoinUnits           Int                @default(0)
+  calculatedOvertimeCoinUnits Int                @default(0)
+  analystFinalOvertimeUnits   Int?
+  overtimeDecision            OvertimeDecision   @default(PENDING)
+  analystComment              String?
+  reviewedByUserId            String?
+  reviewedAt                  DateTime?
+  approvedByUserId            String?
+  approvedAt                  DateTime?
+  rejectionReason             String?
+  createdAt                   DateTime           @default(now())
+  updatedAt                   DateTime           @updatedAt
+  workShift                   WorkShift          @relation(fields: [workShiftId], references: [id], onDelete: Restrict)
+
+  @@index([workerId, status])
+  @@index([status, createdAt])
+  @@index([overtimeDecision, createdAt])
+  @@map("shift_accruals")
+}
+
 model Task {
-  id          String       @id @default(uuid())
+  id          String              @id @default(uuid())
   title       String
   description String?
-  status      TaskStatus   @default(CREATED)
-  priority    TaskPriority @default(NORMAL)
+  location    String?
+  status      TaskStatus          @default(CREATED)
+  priority    TaskPriority        @default(NORMAL)
   creatorId   String
   assigneeId  String?
   processId   String
+  objectId    String?
   completedAt DateTime?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  object      ConstructionObject? @relation(fields: [objectId], references: [id], onDelete: Restrict)
+  steps       TaskStep[]
 
   @@index([status])
   @@index([priority])
   @@index([creatorId])
   @@index([assigneeId])
+  @@index([assigneeId, status])
+  @@index([objectId])
   @@index([processId])
   @@index([createdAt])
   @@map("tasks")
@@ -233,6 +308,7 @@ model TaskStep {
   completedAt DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
+  task        Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
   @@index([status])
@@ -242,23 +318,26 @@ model TaskStep {
 }
 
 model Artifact {
-  id               String       @id @default(uuid())
-  type             ArtifactType @default(PHOTO)
+  id               String          @id @default(uuid())
+  type             ArtifactType    @default(PHOTO)
   eventId          String
   taskId           String?
   taskStepId       String?
+  workShiftId      String?
   uploadedBy       String
   storageKey       String
   originalFileName String
   mimeType         String
   fileSize         Int
-  createdAt        DateTime     @default(now())
+  createdAt        DateTime        @default(now())
   workShiftPhoto   WorkShiftPhoto?
+  event            Event           @relation(fields: [eventId], references: [id], onDelete: Restrict)
 
   @@index([type])
   @@index([eventId])
   @@index([taskId])
   @@index([taskStepId])
+  @@index([workShiftId])
   @@index([uploadedBy])
   @@index([createdAt])
   @@map("artifacts")

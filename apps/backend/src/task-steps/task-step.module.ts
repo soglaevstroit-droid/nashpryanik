@@ -6,12 +6,13 @@ import { AppConfigModule } from '../config/app-config.module.js';
 import { DatabaseModule } from '../database/database.module.js';
 import { EventModule } from '../events/event.module.js';
 import { TaskModule } from '../tasks/task.module.js';
+import { ActiveShiftAccessModule } from '../work-shifts/active-shift-access.module.js';
 import { TaskStepController } from './task-step.controller.js';
 import { TaskStepRepository } from './task-step.repository.js';
 import { TaskStepService } from './task-step.service.js';
 
 @Module({
-  imports: [AppConfigModule, DatabaseModule, EventModule, TaskModule],
+  imports: [ActiveShiftAccessModule, AppConfigModule, DatabaseModule, EventModule, TaskModule],
   controllers: [TaskStepController],
   providers: [TaskStepRepository, TaskStepService, JwtService, JwtAuthGuard, RolesGuard],
   exports: [TaskStepService],

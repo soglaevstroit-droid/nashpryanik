@@ -14,6 +14,7 @@ import { TaskModule } from './tasks/task.module.js';
 import { UserModule } from './users/user.module.js';
 import { WorkspaceModule } from './workspace/workspace.module.js';
 import { WorkShiftModule } from './work-shifts/work-shift.module.js';
+import { WorkerModule } from './worker/worker.module.js';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { WorkShiftModule } from './work-shifts/work-shift.module.js';
     TaskStepModule,
     ArtifactModule,
     WorkspaceModule,
+    WorkerModule,
   ],
 })
 export class AppModule {}

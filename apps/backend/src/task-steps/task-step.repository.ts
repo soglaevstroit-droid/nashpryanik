@@ -26,8 +26,11 @@ export class TaskStepRepository {
     });
   }
 
-  findById(id: string): Promise<TaskStepRecord | null> {
-    return this.prisma.taskStep.findUnique({
+  findById(
+    id: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<TaskStepRecord | null> {
+    return client.taskStep.findUnique({
       where: { id },
     });
   }
@@ -40,8 +43,12 @@ export class TaskStepRepository {
     });
   }
 
-  update(id: string, data: UpdateTaskStepData): Promise<TaskStepRecord> {
-    return this.prisma.taskStep.update({
+  update(
+    id: string,
+    data: UpdateTaskStepData,
+    client: Prisma.TransactionClient = this.prisma,
+  ): Promise<TaskStepRecord> {
+    return client.taskStep.update({
       where: { id },
       data: data as Prisma.TaskStepUpdateInput,
     });

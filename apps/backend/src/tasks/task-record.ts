@@ -9,6 +9,7 @@ export interface TaskRecord {
   creatorId: string;
   assigneeId: string | null;
   processId: string;
+  objectId?: string | null;
   completedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;

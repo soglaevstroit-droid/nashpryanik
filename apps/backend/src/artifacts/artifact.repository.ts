@@ -9,6 +9,7 @@ interface CreateArtifactData {
   eventId: string;
   taskId?: string | null;
   taskStepId?: string | null;
+  workShiftId?: string | null;
   uploadedBy: string;
   storageKey: string;
   originalFileName: string;

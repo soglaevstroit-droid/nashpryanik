@@ -11,10 +11,7 @@ const defaultEventListLimit = 100;
 export class EventService {
   constructor(private readonly repository: EventRepository) {}
 
-  async createEvent(
-    dto: CreateEventDto,
-    client?: Prisma.TransactionClient,
-  ): Promise<EventRecord> {
+  async createEvent(dto: CreateEventDto, client?: Prisma.TransactionClient): Promise<EventRecord> {
     this.assertCreateEventDto(dto);
 
     return this.repository.create(dto, client);
@@ -66,6 +63,11 @@ export class EventService {
     assertNullableString(dto.actorId, 'actorId');
     assertNullableString(dto.entityType, 'entityType');
     assertNullableString(dto.entityId, 'entityId');
+    assertNullableString(dto.objectId, 'objectId');
+    assertNullableString(dto.taskId, 'taskId');
+    assertNullableString(dto.taskStepId, 'taskStepId');
+    assertNullableString(dto.workShiftId, 'workShiftId');
+    assertNullableString(dto.idempotencyKey, 'idempotencyKey');
   }
 }
 

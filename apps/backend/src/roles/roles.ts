@@ -4,6 +4,7 @@ export const roles = [
   'CREATOR',
   'DIRECTOR',
   'FINANCE',
+  'ANALYST',
   'FOREMAN',
   'WORKER',
   'PARTNER',

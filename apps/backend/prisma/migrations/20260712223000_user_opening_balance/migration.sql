@@ -1,0 +1,2 @@
+ALTER TABLE "users"
+ADD COLUMN "openingBalanceCoinUnits" INTEGER NOT NULL DEFAULT 0;

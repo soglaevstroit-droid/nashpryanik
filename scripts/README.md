@@ -37,10 +37,21 @@ PID запущенных процессов хранится в `.runtime/dev-pr
 
 ## Резервное копирование production
 
-Подготовительная команда `npm run backup` проверяет локальные prerequisites, создаёт будущую
-структуру хранения и выводит план без подключения к production и без запуска `pg_dump`.
-Подробный процесс описан в [`docs/PRODUCTION_BACKUP.md`](../docs/PRODUCTION_BACKUP.md).
+`npm run backup` является alias gated-команды `backup:create` и без `--approved` всегда
+отказывает. До отдельного утверждения используйте только диагностические команды. Подробный
+процесс описан в [`docs/PRODUCTION_BACKUP.md`](../docs/PRODUCTION_BACKUP.md).
 
 `npm run backup:check` выполняет разрешённую read-only диагностику готовности production.
 JSON-результат доступен через `npm run backup:check -- --json`. Команда не создаёт backup и
 не запускает `pg_dump`.
+
+Полный цикл:
+
+- `npm run backup:restore-check` — изолированное восстановление последнего архива;
+- `npm run backup:create -- --approved` — атомарный backup, checksum, скачивание и restore-check;
+- `npm run publish:check` — все preflight-проверки без публикации;
+- `npm run publish -- --dry-run` — безопасный план без изменений;
+- `npm run publish -- --approved --message "…"` — этап 2, только после точного утверждения.
+
+Общая логика безопасности находится в `scripts/lib/`. Технические JSON-отчёты сохраняются в
+игнорируемом каталоге `.runtime/reports/` без секретов и содержимого пользовательских данных.

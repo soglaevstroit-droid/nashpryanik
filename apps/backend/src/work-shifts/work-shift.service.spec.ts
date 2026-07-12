@@ -78,9 +78,8 @@ function createArtifact(overrides: Partial<ArtifactRecord> = {}): ArtifactRecord
 function jpegFile(overrides: Partial<UploadedArtifactFile> = {}): UploadedArtifactFile {
   return {
     buffer: Buffer.from([
-      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00,
-      0x10, 0x00, 0x20, 0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11,
-      0x00, 0xff, 0xd9,
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x02, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x10, 0x00, 0x20,
+      0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
     ]),
     originalname: 'photo.jpg',
     mimetype: 'application/octet-stream',
@@ -304,14 +303,16 @@ function createShiftPhotos(seed: WorkShiftPhotoBundle[] = []): WorkShiftPhotoRep
   } as WorkShiftPhotoRepository;
 }
 
-function createService(options: {
-  repository?: WorkShiftRepository;
-  eventTypes?: string[];
-  processEvents?: string[];
-  artifactEvents?: string[];
-  shiftPhotos?: WorkShiftPhotoRepository;
-  artifacts?: ArtifactService;
-} = {}): WorkShiftService {
+function createService(
+  options: {
+    repository?: WorkShiftRepository;
+    eventTypes?: string[];
+    processEvents?: string[];
+    artifactEvents?: string[];
+    shiftPhotos?: WorkShiftPhotoRepository;
+    artifacts?: ArtifactService;
+  } = {},
+): WorkShiftService {
   const eventTypes = options.eventTypes ?? [];
   const processEvents = options.processEvents ?? [];
   const artifactEvents = options.artifactEvents ?? [];
@@ -480,7 +481,12 @@ test('rejects operation id owned by another action', async () => {
   });
 
   await assert.rejects(
-    () => service.startShiftWithPhoto(user, { capturedAt, timezone: 'Europe/Moscow', operationId }, jpegFile()),
+    () =>
+      service.startShiftWithPhoto(
+        user,
+        { capturedAt, timezone: 'Europe/Moscow', operationId },
+        jpegFile(),
+      ),
     ConflictException,
   );
 });
@@ -491,7 +497,12 @@ test('rejects opening second active shift with photo', async () => {
   });
 
   await assert.rejects(
-    () => service.startShiftWithPhoto(user, { capturedAt, timezone: 'Europe/Moscow', operationId }, jpegFile()),
+    () =>
+      service.startShiftWithPhoto(
+        user,
+        { capturedAt, timezone: 'Europe/Moscow', operationId },
+        jpegFile(),
+      ),
     ConflictException,
   );
 });
@@ -552,7 +563,7 @@ test('compensates stored object when database operation fails after upload', asy
     createRepository(),
     {
       createEvent: async () => {
-      throw new Error('database failed');
+        throw new Error('database failed');
       },
     } as unknown as EventService,
     createProcessService([]),
@@ -563,7 +574,12 @@ test('compensates stored object when database operation fails after upload', asy
   );
 
   await assert.rejects(
-    () => service.startShiftWithPhoto(user, { capturedAt, timezone: 'Europe/Moscow', operationId }, jpegFile()),
+    () =>
+      service.startShiftWithPhoto(
+        user,
+        { capturedAt, timezone: 'Europe/Moscow', operationId },
+        jpegFile(),
+      ),
     /database failed/,
   );
   assert.deepEqual(artifactEvents, ['PHOTO_UPLOADED', 'store', 'delete']);
