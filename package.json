@@ -7,6 +7,7 @@
     "apps/backend"
   ],
   "scripts": {
+    "backup": "node scripts/backup.mjs",
     "dev": "node scripts/dev.mjs",
     "stop": "node scripts/stop-dev.mjs",
     "format:check": "prettier --check \"README.md\" \"LOCAL_VERIFICATION_CHECKLIST.md\" \".github/**/*.yml\" \"apps/**/*.{json,md,ts,yaml}\" \"packages/**/*.md\" \"infra/**/*.{md,yml}\" \"scripts/**/*.{mjs,md}\" \"docs/**/*.md\" \"*.{json,mjs}\" \".*.jsonc\"",

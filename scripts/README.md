@@ -34,3 +34,9 @@ PID запущенных процессов хранится в `.runtime/dev-pr
 
 `prisma.mjs` запускает установленный в npm workspace Prisma CLI без жесткой привязки к
 расположению `node_modules`.
+
+## Резервное копирование production
+
+Подготовительная команда `npm run backup` проверяет локальные prerequisites, создаёт будущую
+структуру хранения и выводит план без подключения к production и без запуска `pg_dump`.
+Подробный процесс описан в [`docs/PRODUCTION_BACKUP.md`](../docs/PRODUCTION_BACKUP.md).
