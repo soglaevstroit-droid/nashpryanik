@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   assignSequentialClonePositions,
@@ -112,4 +113,14 @@ test('event snapshots remap source ids without mutating their source object', ()
     nested: ['step-clone', { text: 'task-clone' }],
   });
   assert.equal(source.taskId, 'task-source');
+});
+
+test('clone tasks and manager actions stay isolated to work and work2', async () => {
+  const source = await readFile(new URL('./clone-ilya-to-work.js', import.meta.url), 'utf8');
+
+  assert.match(
+    source,
+    /creatorId:\s*mapActor\(sourceTask\.creatorId, context\) \?\? context\.managerUserId/,
+  );
+  assert.doesNotMatch(source, /creatorId:\s*sourceTask\.creatorId/);
 });

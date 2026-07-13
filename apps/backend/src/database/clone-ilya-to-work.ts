@@ -362,7 +362,7 @@ async function createCloneRecords(context: CloneContext): Promise<void> {
             priority: sourceTask.priority,
             accessStatus: sourceTask.accessStatus,
             position: clonePosition,
-            creatorId: sourceTask.creatorId,
+            creatorId: mapActor(sourceTask.creatorId, context) ?? context.managerUserId,
             assigneeId: context.targetUserId,
             processId,
             objectId: sourceTask.objectId,
