@@ -92,6 +92,13 @@ test('step actions are enabled only for a started task and use backend state', (
   assert.match(app, /api\/v1\/task-steps/);
 });
 
+test('top task status switch receives the selected backend task status class', () => {
+  assert.match(
+    app,
+    /control\.className = `taskStatusControl \$\{taskCardStatusClass\(selectedTask\.status\)\}`/,
+  );
+});
+
 test('task workspace reuses the slider, camera, messages and archive APIs', () => {
   assert.match(html, /taskWorkspaceCard/);
   assert.match(app, /openShiftCamera\('TASK_STEP', stepId\)/);

@@ -1245,6 +1245,7 @@ function renderSelectedTask() {
 
 function renderSelectedTaskControl() {
   const control = views.taskDetail.querySelector('[data-task-status-control]');
+  control.className = `taskStatusControl ${taskCardStatusClass(selectedTask.status)}`;
   if (isManager()) {
     control.disabled = true;
     control.dataset.detailTaskAction = '';
