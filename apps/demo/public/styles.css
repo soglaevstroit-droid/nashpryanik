@@ -831,21 +831,26 @@ p {
 
 .taskStatusControl.is-accepted,
 .taskCard.is-accepted,
-.homeTaskStatus.is-accepted,
-.taskStatusControl.is-working,
-.taskCard.is-working,
-.homeTaskStatus.is-working {
+.homeTaskStatus.is-accepted {
   --status-icon-color: #4caf50;
   --task-card-status-color: #4caf50;
   background: #4caf50;
 }
 
+.taskStatusControl.is-working,
+.taskCard.is-working,
+.homeTaskStatus.is-working {
+  --status-icon-color: var(--green);
+  --task-card-status-color: var(--green);
+  background: var(--green);
+}
+
 .taskStatusControl.is-paused,
 .taskCard.is-paused,
 .homeTaskStatus.is-paused {
-  --status-icon-color: var(--accent-strong);
-  --task-card-status-color: var(--accent-strong);
-  background: var(--accent-strong);
+  --status-icon-color: var(--accent);
+  --task-card-status-color: var(--accent);
+  background: var(--accent);
 }
 
 .taskStatusControl.is-review,
