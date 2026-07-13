@@ -246,10 +246,17 @@ export class ArtifactService {
     const step = await this.database.taskStep.findUnique({
       where: { id: dto.taskStepId },
       include: {
-        task: { include: { steps: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } } },
+        task: {
+          include: {
+            steps: {
+              where: { deletedAt: null },
+              orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+            },
+          },
+        },
       },
     });
-    if (!step || step.task.assigneeId !== user.id || step.task.deletedAt)
+    if (!step || step.deletedAt || step.task.assigneeId !== user.id || step.task.deletedAt)
       throw new NotFoundException('Task not found');
     if (dto.taskId && dto.taskId !== step.taskId)
       throw new BadRequestException('Task step does not belong to task');

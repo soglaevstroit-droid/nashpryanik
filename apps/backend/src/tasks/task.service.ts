@@ -105,7 +105,7 @@ export class TaskService {
         snapshot,
       );
       const firstStep = await client?.taskStep.findFirst({
-        where: { taskId: task.id, status: { in: ['CREATED', 'REOPENED'] } },
+        where: { taskId: task.id, deletedAt: null, status: { in: ['CREATED', 'REOPENED'] } },
         orderBy: { order: 'asc' },
       });
       if (firstStep && client) {
@@ -188,7 +188,7 @@ export class TaskService {
         if (current.isWorkBlocked || current.accessStatus === 'CLOSED')
           throw new BadRequestException('Работа по задаче заблокирована');
         const incompleteSteps = await client.taskStep.count({
-          where: { taskId: task.id, status: { not: 'COMPLETED' } },
+          where: { taskId: task.id, deletedAt: null, status: { not: 'COMPLETED' } },
         });
         if (incompleteSteps > 0) throw new BadRequestException('Complete all task steps first');
         const completedAt = new Date();

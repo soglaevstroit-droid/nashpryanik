@@ -3718,6 +3718,1042 @@ a:focus-visible {
   }
 }
 
+/* Manager task composer: one responsive, role-aware modal. */
+.modalLayer.is-manager-task-modal {
+  padding: max(12px, var(--safe-top)) max(12px, var(--safe-right)) max(12px, var(--safe-bottom))
+    max(12px, var(--safe-left));
+  overflow: hidden;
+  background: rgb(27 24 22 / 54%);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+.modalCard.managerTaskModal {
+  position: relative;
+  width: min(calc(100vw - 28px - var(--safe-left) - var(--safe-right)), 680px);
+  height: min(calc(100dvh - 28px - var(--safe-top) - var(--safe-bottom)), 920px);
+  max-height: calc(100dvh - 28px - var(--safe-top) - var(--safe-bottom));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 28px;
+  background: #fff;
+  text-align: left;
+  box-shadow: 0 30px 90px rgb(17 17 17 / 28%);
+}
+
+.modalCard.managerTaskModal.is-active {
+  display: flex;
+  flex-direction: column;
+  animation: modalCardIn 180ms ease-out both;
+}
+
+.managerTaskModal form {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+}
+
+.managerDialogHeader {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 44px;
+  gap: 14px;
+  align-items: center;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #f0efed;
+  background: rgb(255 255 255 / 96%);
+}
+
+.managerHeaderIcon {
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.managerHeaderIcon::before {
+  position: absolute;
+  inset: 12px 13px 10px;
+  content: '';
+  border: 2px solid currentcolor;
+  border-radius: 5px;
+}
+
+.managerHeaderIcon::after {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 12px;
+  height: 8px;
+  content: '';
+  border-top: 2px solid currentcolor;
+  border-bottom: 2px solid currentcolor;
+}
+
+.managerDialogHeader h2,
+.modalCard.managerTaskModal .managerDialogHeader h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(24px, 5vw, 31px);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+
+.managerDialogHeader p,
+.modalCard.managerTaskModal .managerDialogHeader p {
+  margin: 5px 0 0;
+  color: #7e7b78;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.managerCloseButton {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  padding: 0;
+  border-radius: 14px;
+  background: #f4f3f2;
+  color: #55514e;
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.managerCloseButton:hover {
+  background: #ebe9e7;
+}
+
+.managerFormBody {
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+  scroll-padding: 24px 0 120px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.managerFormGroup {
+  display: grid;
+  gap: 18px;
+}
+
+.managerFormGroup + .managerFormGroup {
+  margin-top: 30px;
+  padding-top: 26px;
+  border-top: 1px solid #f0efed;
+}
+
+.managerGroupTitle {
+  margin: 0;
+  color: #77736f;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.managerTaskModal .managerField {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.managerFieldLabel,
+.managerChoiceGroup legend {
+  padding: 0;
+  color: #24211f;
+  font-size: 15px;
+  line-height: 1.25;
+  font-style: normal;
+  font-weight: 720;
+  text-align: left;
+}
+
+.requiredMark {
+  color: var(--accent);
+  font-style: normal;
+}
+
+.managerTaskModal input:not([type='radio']):not([type='file']),
+.managerTaskModal select,
+.managerTaskModal textarea {
+  width: 100%;
+  min-height: 54px;
+  padding: 13px 15px;
+  border: 1px solid #dfddda;
+  border-radius: 16px;
+  outline: none;
+  background: #fff;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.35;
+  box-shadow: 0 1px 0 rgb(17 17 17 / 2%);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background-color 150ms ease;
+}
+
+.managerTaskModal input::placeholder,
+.managerTaskModal textarea::placeholder {
+  color: #aaa6a2;
+}
+
+.managerTaskModal input:not([type='radio']):not([type='file']):focus,
+.managerTaskModal select:focus,
+.managerTaskModal textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgb(240 122 0 / 11%);
+}
+
+#managerTaskForm.was-validated input:not([type='radio']):not([type='file']):invalid,
+#managerTaskForm.was-validated select:invalid,
+#managerTaskForm.was-validated textarea:invalid {
+  border-color: #d84a42;
+  background: #fffafa;
+  box-shadow: 0 0 0 3px rgb(216 74 66 / 9%);
+}
+
+.managerTaskModal textarea,
+.managerTaskModal #managerDescription {
+  min-height: 122px;
+  resize: vertical;
+}
+
+.managerSelectShell {
+  position: relative;
+  display: block;
+}
+
+.managerSelectShell::after {
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  width: 8px;
+  height: 8px;
+  content: '';
+  border-right: 2px solid #817d79;
+  border-bottom: 2px solid #817d79;
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
+}
+
+.managerTaskModal select {
+  padding-right: 46px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.managerWorkerSelectShell::before {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 12px;
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  content: '';
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 35%, var(--accent) 0 4px, transparent 4.5px),
+    radial-gradient(ellipse at 50% 82%, var(--accent) 0 8px, transparent 8.5px), var(--accent-soft);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.managerWorkerSelectShell select {
+  padding-left: 52px;
+}
+
+.managerFileInput {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0 !important;
+  opacity: 0;
+  white-space: nowrap;
+}
+
+.managerUploadZone {
+  display: grid;
+  min-height: 112px;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  width: 100%;
+  padding: 16px;
+  border: 1.5px dashed #e2b88f;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fffaf6, #fff7f0);
+  color: var(--text);
+  text-align: center;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    transform 150ms ease;
+}
+
+.managerUploadZone:hover,
+.managerUploadZone:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  background: #fff3e9;
+  box-shadow: 0 0 0 4px rgb(240 122 0 / 10%);
+}
+
+.managerUploadZone strong {
+  font-size: 15px;
+}
+
+.managerUploadZone small {
+  color: #817d79;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.managerUploadIcon {
+  position: relative;
+  display: block;
+  width: 31px;
+  height: 25px;
+  margin-bottom: 2px;
+  border: 2px solid var(--accent);
+  border-radius: 7px;
+}
+
+.managerUploadIcon::before {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 5px;
+  height: 5px;
+  content: '';
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.managerUploadIcon::after {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  left: 4px;
+  height: 9px;
+  content: '';
+  background: var(--accent);
+  clip-path: polygon(0 100%, 35% 35%, 54% 70%, 72% 48%, 100% 100%);
+}
+
+.managerPhotoMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #85817d;
+  font-size: 12px;
+}
+
+.managerPhotoPreview {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 2px 8px;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+
+.managerPhotoPreview[hidden] {
+  display: none;
+}
+
+.managerPhotoPreview figure {
+  position: relative;
+  width: 92px;
+  min-width: 92px;
+  margin: 0;
+  scroll-snap-align: start;
+}
+
+.managerPhotoPreview img {
+  display: block;
+  width: 92px;
+  height: 82px;
+  border-radius: 13px;
+  object-fit: cover;
+  background: #f2f1ef;
+}
+
+.managerPhotoPreview figcaption {
+  margin-top: 5px;
+  overflow: hidden;
+  color: #77736f;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managerPhotoPreview button {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #3f3b38;
+  color: #fff;
+  font-size: 17px;
+  line-height: 1;
+  box-shadow: 0 4px 10px rgb(17 17 17 / 18%);
+}
+
+.managerFieldError,
+.managerFormError {
+  margin: 0;
+  padding: 11px 13px;
+  border-radius: 12px;
+  background: #fff0ef;
+  color: #b42318;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.managerFormError {
+  margin-bottom: 20px;
+}
+
+.managerSectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.managerSectionHead h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.managerSectionHead h3 span {
+  color: var(--accent);
+}
+
+.managerAddStepButton {
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: #c55f00;
+  font-size: 13px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.managerStepsList {
+  display: grid;
+  gap: 12px;
+}
+
+.managerStepFields {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 17px 17px 17px 20px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #f7f6f5;
+  box-shadow: inset 0 0 0 1px rgb(17 17 17 / 3%);
+}
+
+.managerStepFields::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  content: '';
+  background: linear-gradient(180deg, #ff9a2f, var(--accent));
+}
+
+.managerStepHeader,
+.managerStepHeader > div {
+  display: flex;
+  align-items: center;
+}
+
+.managerStepHeader .managerStepTools {
+  display: flex;
+  gap: 6px;
+}
+
+.managerMoveStepButton {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid #e5e1dd;
+  border-radius: 10px;
+  background: #fff;
+  color: #6d6761;
+  font-weight: 850;
+}
+
+.managerMoveStepButton:disabled {
+  opacity: 0.35;
+}
+
+.managerStepFields.is-readonly {
+  background: #f4f7f2;
+}
+
+.managerStepFields.is-readonly::before {
+  background: #4e9b4a;
+}
+
+.managerStepFields.is-readonly input,
+.managerStepFields.is-readonly textarea {
+  background: #f7f8f6;
+  color: #55514c;
+}
+
+.managerStepReadonlyNote {
+  display: block;
+  margin-top: 8px;
+  color: #4e844a;
+  font-weight: 700;
+}
+
+.managerPhotoUnavailable {
+  display: grid;
+  width: 100%;
+  height: 78px;
+  place-items: center;
+  background: #f2f0ed;
+  color: #777;
+  font-size: 11px;
+}
+
+.managerControlValue {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f7f5f2;
+}
+
+.managerControlValue small {
+  color: #817a74;
+}
+
+.managerEditUnavailable {
+  margin: 0;
+  color: #77716b;
+  font-size: 13px;
+}
+
+.messageCard.is-unread {
+  border-color: rgb(240 122 0 / 35%);
+  box-shadow: 0 8px 22px rgb(240 122 0 / 10%);
+}
+
+.managerStepHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.managerStepHeader > div {
+  gap: 9px;
+}
+
+.managerStepHeader strong {
+  color: #383431;
+  font-size: 14px;
+}
+
+.managerStepNumber {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.managerRemoveStepButton {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  padding: 0;
+  border-radius: 11px;
+  background: #eeecea;
+  color: #77716d;
+  font-size: 19px;
+}
+
+.managerRemoveStepButton:hover {
+  background: #ffebe9;
+  color: #c72f26;
+}
+
+.managerStepFields textarea {
+  min-height: 88px;
+}
+
+.managerParameterGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.managerChoiceGroup {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.managerChoiceGroup legend {
+  margin-bottom: 9px;
+}
+
+.managerChoiceGroup legend span {
+  color: var(--accent);
+}
+
+.managerSegmentedControl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 4px;
+  border-radius: 15px;
+  background: #f3f2f0;
+}
+
+.managerTaskModal .managerSegmentOption {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.managerSegmentOption input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.managerSegmentOption span {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  padding: 8px 7px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #77736f;
+  font-size: 13px;
+  font-weight: 720;
+  text-align: center;
+  cursor: pointer;
+}
+
+.managerSegmentOption input:checked + span {
+  border-color: rgb(240 122 0 / 35%);
+  background: #fff7f0;
+  color: #b95700;
+  box-shadow: 0 2px 7px rgb(89 48 12 / 7%);
+}
+
+.managerSegmentOption input:focus-visible + span {
+  outline: 3px solid rgb(240 122 0 / 18%);
+  outline-offset: 1px;
+}
+
+.managerAssignmentRow {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(122px, 1fr);
+  gap: 14px;
+}
+
+.managerTaskModal input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.managerTaskModal input[type='number']::-webkit-inner-spin-button,
+.managerTaskModal input[type='number']::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.managerFormActions {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(104px, 0.36fr) minmax(0, 0.64fr);
+  gap: 12px;
+  padding: 16px 24px max(16px, var(--safe-bottom));
+  border-top: 1px solid #efeeec;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 -12px 28px rgb(17 17 17 / 5%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.managerCancelButton,
+.managerSubmitButton {
+  min-height: 54px;
+  margin: 0;
+  border-radius: 16px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.managerCancelButton {
+  border: 1px solid #dedbd8;
+  background: #fff;
+  color: #4e4945;
+}
+
+.managerSubmitButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, #ff941f, var(--accent));
+  color: #fff;
+  box-shadow: 0 10px 22px rgb(240 122 0 / 24%);
+}
+
+.managerSubmitButton:disabled {
+  background: #d8d5d2;
+  color: #8f8b87;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.managerSubmitSpinner {
+  display: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgb(255 255 255 / 45%);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: managerSpin 700ms linear infinite;
+}
+
+.managerSubmitButton.is-loading .managerSubmitIcon {
+  display: none;
+}
+
+.managerSubmitButton.is-loading .managerSubmitSpinner {
+  display: block;
+}
+
+.managerFormConfirm {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(30 27 25 / 45%);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.managerFormConfirm[hidden] {
+  display: none;
+}
+
+.managerConfirmCard {
+  width: min(100%, 430px);
+  max-height: calc(100dvh - 72px - var(--safe-top) - var(--safe-bottom));
+  padding: 24px;
+  overflow-y: auto;
+  border-radius: 22px;
+  background: #fff;
+  text-align: center;
+  box-shadow: 0 24px 70px rgb(17 17 17 / 28%);
+  animation: modalCardIn 160ms ease-out both;
+}
+
+.managerConfirmIcon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  margin: 0 auto 14px;
+  border-radius: 15px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 22px;
+  font-weight: 850;
+}
+
+.managerConfirmCard h3 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.managerConfirmCard > p {
+  margin: 8px 0 0;
+  color: #77736f;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.managerConfirmSummary {
+  margin-top: 18px;
+  padding: 5px 14px;
+  border-radius: 15px;
+  background: #f7f6f5;
+  text-align: left;
+}
+
+.managerConfirmSummary dl {
+  margin: 0;
+}
+
+.managerConfirmSummary div {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid #e8e6e3;
+}
+
+.managerConfirmSummary div:last-child {
+  border-bottom: 0;
+}
+
+.managerConfirmSummary dt {
+  color: #85817d;
+  font-size: 12px;
+}
+
+.managerConfirmSummary dd {
+  min-width: 0;
+  margin: 0;
+  color: #2d2926;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.managerConfirmActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.managerConfirmActions button {
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.managerConfirmBack {
+  border: 1px solid #dedbd8;
+  background: #fff;
+  color: #504b47;
+}
+
+.managerConfirmSubmit {
+  background: var(--accent);
+  color: #fff;
+}
+
+.managerConfirmSubmit.is-danger {
+  background: #c83a31;
+}
+
+.managerTaskModal button:focus-visible,
+.managerTaskModal [tabindex]:focus-visible {
+  outline: 3px solid rgb(240 122 0 / 25%);
+  outline-offset: 2px;
+}
+
+@keyframes managerSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 520px) {
+  .modalCard.managerTaskModal {
+    width: calc(100vw - 24px - var(--safe-left) - var(--safe-right));
+    height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom));
+    max-height: calc(100dvh - 24px - var(--safe-top) - var(--safe-bottom));
+    border-radius: 24px;
+  }
+
+  .managerDialogHeader {
+    grid-template-columns: 44px minmax(0, 1fr) 42px;
+    gap: 11px;
+    padding: 18px 18px 15px;
+  }
+
+  .managerHeaderIcon {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+  }
+
+  .managerDialogHeader h2,
+  .modalCard.managerTaskModal .managerDialogHeader h2 {
+    font-size: clamp(22px, 6.2vw, 27px);
+  }
+
+  .managerDialogHeader p,
+  .modalCard.managerTaskModal .managerDialogHeader p {
+    font-size: 12px;
+  }
+
+  .managerCloseButton {
+    width: 42px;
+    height: 42px;
+  }
+
+  .managerFormBody {
+    padding: 20px 18px 24px;
+  }
+
+  .managerFormGroup + .managerFormGroup {
+    margin-top: 26px;
+    padding-top: 23px;
+  }
+
+  .managerParameterGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .managerFormActions {
+    padding: 13px 18px max(13px, var(--safe-bottom));
+  }
+}
+
+@media (max-width: 350px) {
+  .modalCard.managerTaskModal {
+    width: calc(100vw - 16px - var(--safe-left) - var(--safe-right));
+    height: calc(100dvh - 16px - var(--safe-top) - var(--safe-bottom));
+    max-height: calc(100dvh - 16px - var(--safe-top) - var(--safe-bottom));
+    border-radius: 20px;
+  }
+
+  .managerDialogHeader {
+    grid-template-columns: 40px minmax(0, 1fr) 38px;
+    gap: 8px;
+    padding: 14px;
+  }
+
+  .managerHeaderIcon,
+  .managerCloseButton {
+    width: 38px;
+    height: 38px;
+  }
+
+  .managerHeaderIcon::before {
+    inset: 9px 10px 8px;
+  }
+
+  .managerHeaderIcon::after {
+    top: 14px;
+    left: 14px;
+    width: 10px;
+  }
+
+  .managerDialogHeader h2,
+  .modalCard.managerTaskModal .managerDialogHeader h2 {
+    font-size: 20px;
+  }
+
+  .managerDialogHeader p,
+  .modalCard.managerTaskModal .managerDialogHeader p {
+    margin-top: 3px;
+    font-size: 11px;
+  }
+
+  .managerFormBody {
+    padding: 17px 14px 22px;
+  }
+
+  .managerSectionHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .managerAddStepButton {
+    align-self: stretch;
+  }
+
+  .managerAssignmentRow {
+    grid-template-columns: 1fr;
+  }
+
+  .managerFormActions {
+    grid-template-columns: minmax(86px, 0.34fr) minmax(0, 0.66fr);
+    gap: 8px;
+    padding: 11px 14px max(11px, var(--safe-bottom));
+  }
+
+  .managerCancelButton,
+  .managerSubmitButton {
+    min-height: 50px;
+    padding-inline: 9px;
+    font-size: 13px;
+  }
+
+  .managerConfirmCard {
+    padding: 20px 16px;
+  }
+
+  .managerConfirmActions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modalCard.managerTaskModal.is-active,
+  .managerConfirmCard,
+  .managerSubmitSpinner {
+    animation-duration: 1ms;
+  }
+
+  .managerTaskModal * {
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Corrected task workspace: simple islands and a compact work-step sequence. */
 #taskDetailView .taskStatusHead {
   grid-template-columns: 104px minmax(0, 1fr);

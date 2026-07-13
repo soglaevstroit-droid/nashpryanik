@@ -19,6 +19,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { ManagerTaskInput, ManagerTaskService } from './manager-task.service.js';
+import { ManagerTaskEditInput } from './manager-task.service.js';
 import { TaskAccessStatus, TaskPriority } from '@prisma/client';
 
 interface ManagerUpdateBody {
@@ -26,6 +27,7 @@ interface ManagerUpdateBody {
   priority?: TaskPriority;
   accessStatus?: TaskAccessStatus;
   position?: number;
+  reason?: string;
 }
 interface ManagerDeleteBody {
   operationId: string;
@@ -79,6 +81,16 @@ export class ManagerTaskController {
     @Body() body: ManagerUpdateBody,
   ) {
     return this.manager.updateTask(user, taskId, body);
+  }
+  @Patch('tasks/:taskId/edit')
+  @UseInterceptors(FilesInterceptor('photos', 12, { limits: managerTaskUploadLimits }))
+  edit(
+    @CurrentUser() user: AuthUser,
+    @Param('taskId') taskId: string,
+    @Body('payload') payload: string,
+    @UploadedFiles() files: UploadedArtifactFile[] = [],
+  ) {
+    return this.manager.editTask(user, taskId, JSON.parse(payload) as ManagerTaskEditInput, files);
   }
   @Delete('tasks/:taskId') remove(
     @CurrentUser() user: AuthUser,

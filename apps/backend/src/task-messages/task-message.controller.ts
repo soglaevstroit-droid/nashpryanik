@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ManagerDecision } from '@prisma/client';
 import { AuthUser } from '../auth/auth-user.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
@@ -36,6 +36,12 @@ export class TaskMessageController {
   @Roles('WORKER')
   workerMessages(@CurrentUser() user: AuthUser) {
     return this.messages.workerMessages(user);
+  }
+
+  @Patch('worker/messages/:messageId/read')
+  @Roles('WORKER')
+  markRead(@CurrentUser() user: AuthUser, @Param('messageId') messageId: string) {
+    return this.messages.markRead(user, messageId);
   }
 
   @Get('manager/messages')

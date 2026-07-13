@@ -549,57 +549,233 @@
           </button>
         </section>
 
-        <section id="managerTaskModal" class="modalCard managerTaskModal">
+        <section
+          id="managerTaskModal"
+          class="modalCard managerTaskModal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="managerTaskTitle"
+          tabindex="-1"
+        >
           <form id="managerTaskForm">
-            <div class="managerFormHead">
-              <h2>Поставить задачу</h2>
-              <button type="button" class="iconOnly" data-close-manager-form aria-label="Закрыть">
+            <header class="managerDialogHeader">
+              <span class="managerHeaderIcon" aria-hidden="true"></span>
+              <div>
+                <h2 id="managerTaskTitle">Поставить задачу</h2>
+                <p>Создайте новую задачу для монтажника</p>
+              </div>
+              <button
+                type="button"
+                class="managerCloseButton"
+                data-close-manager-form
+                aria-label="Закрыть форму постановки задачи"
+              >
                 ×
               </button>
+            </header>
+
+            <div class="managerFormBody">
+              <p
+                id="managerFormError"
+                class="managerFormError"
+                role="alert"
+                tabindex="-1"
+                hidden
+              ></p>
+
+              <section class="managerFormGroup" aria-labelledby="managerMainInfoTitle">
+                <h3 id="managerMainInfoTitle" class="managerGroupTitle">Основная информация</h3>
+
+                <label class="managerField" for="managerObject">
+                  <span class="managerFieldLabel"
+                    >Объект <i class="requiredMark" aria-hidden="true">*</i></span
+                  >
+                  <span class="managerSelectShell">
+                    <select id="managerObject" required aria-required="true"></select>
+                  </span>
+                </label>
+
+                <label class="managerField" for="managerLocation">
+                  <span class="managerFieldLabel"
+                    >Место <i class="requiredMark" aria-hidden="true">*</i></span
+                  >
+                  <input
+                    id="managerLocation"
+                    required
+                    aria-required="true"
+                    placeholder="Например: Этаж 3 / Пом. 314"
+                  />
+                </label>
+
+                <label class="managerField" for="managerTitle">
+                  <span class="managerFieldLabel"
+                    >Название задачи <i class="requiredMark" aria-hidden="true">*</i></span
+                  >
+                  <input
+                    id="managerTitle"
+                    minlength="3"
+                    maxlength="160"
+                    required
+                    aria-required="true"
+                    placeholder="Краткое название задачи"
+                  />
+                </label>
+
+                <label class="managerField" for="managerDescription">
+                  <span class="managerFieldLabel">Описание</span>
+                  <textarea
+                    id="managerDescription"
+                    placeholder="Подробное описание задачи, материалы, требования…"
+                  ></textarea>
+                </label>
+
+                <div class="managerField managerPhotoField">
+                  <span class="managerFieldLabel">Фото</span>
+                  <input
+                    id="managerPhotos"
+                    class="managerFileInput"
+                    type="file"
+                    accept="image/jpeg,image/webp"
+                    multiple
+                    tabindex="-1"
+                  />
+                  <button
+                    class="managerUploadZone"
+                    type="button"
+                    data-open-manager-photos
+                    aria-describedby="managerPhotoHint managerPhotoError"
+                  >
+                    <span class="managerUploadIcon" aria-hidden="true"></span>
+                    <strong>Выбрать фотографии</strong>
+                    <small id="managerPhotoHint">JPEG, WebP — до 8 МБ каждое, максимум 12</small>
+                  </button>
+                  <p id="managerPhotoError" class="managerFieldError" role="alert" hidden></p>
+                  <div class="managerPhotoMeta">
+                    <span id="managerPhotoCount">Выбрано: 0 из 12</span>
+                    <span id="managerPhotoSize">0 МБ</span>
+                  </div>
+                  <div id="managerPhotoPreview" class="managerPhotoPreview" hidden></div>
+                </div>
+              </section>
+
+              <section
+                class="managerFormGroup managerStepsSection"
+                aria-labelledby="managerStepsTitle"
+              >
+                <div class="managerSectionHead">
+                  <h3 id="managerStepsTitle"><span aria-hidden="true">☷</span> Этапы работ</h3>
+                  <button type="button" class="managerAddStepButton" data-add-manager-step>
+                    <span aria-hidden="true">+</span> Добавить этап
+                  </button>
+                </div>
+                <div id="managerSteps" class="managerStepsList"></div>
+              </section>
+
+              <section class="managerFormGroup" aria-labelledby="managerParametersTitle">
+                <h3 id="managerParametersTitle" class="managerGroupTitle">Параметры задачи</h3>
+                <div class="managerParameterGrid">
+                  <fieldset class="managerChoiceGroup">
+                    <legend><span aria-hidden="true">☆</span> Приоритет</legend>
+                    <div class="managerSegmentedControl">
+                      <label class="managerSegmentOption">
+                        <input type="radio" name="managerPriority" value="NORMAL" checked />
+                        <span>Обычная</span>
+                      </label>
+                      <label class="managerSegmentOption">
+                        <input type="radio" name="managerPriority" value="URGENT" />
+                        <span>Срочная</span>
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <fieldset class="managerChoiceGroup">
+                    <legend><span aria-hidden="true">⌑</span> Доступ</legend>
+                    <div class="managerSegmentedControl">
+                      <label class="managerSegmentOption">
+                        <input type="radio" name="managerAccess" value="OPEN" checked />
+                        <span>Открытая</span>
+                      </label>
+                      <label class="managerSegmentOption">
+                        <input type="radio" name="managerAccess" value="CLOSED" />
+                        <span>Закрытая</span>
+                      </label>
+                    </div>
+                  </fieldset>
+                </div>
+
+                <div class="managerAssignmentRow">
+                  <label class="managerField" for="managerWorker">
+                    <span class="managerFieldLabel"
+                      >Исполнитель <i class="requiredMark" aria-hidden="true">*</i></span
+                    >
+                    <span class="managerSelectShell managerWorkerSelectShell">
+                      <select id="managerWorker" required aria-required="true"></select>
+                    </span>
+                  </label>
+                  <label class="managerField" for="managerPosition">
+                    <span class="managerFieldLabel"
+                      >Номер задачи <i class="requiredMark" aria-hidden="true">*</i></span
+                    >
+                    <input
+                      id="managerPosition"
+                      type="number"
+                      min="1"
+                      step="1"
+                      inputmode="numeric"
+                      value="1"
+                      required
+                      aria-required="true"
+                    />
+                  </label>
+                </div>
+
+                <label id="managerReasonField" class="managerField" for="managerEditReason" hidden>
+                  <span class="managerFieldLabel"
+                    >Причина изменений <i class="requiredMark" aria-hidden="true">*</i></span
+                  >
+                  <textarea
+                    id="managerEditReason"
+                    maxlength="1000"
+                    placeholder="Объясните сотруднику, почему задача изменена…"
+                  ></textarea>
+                </label>
+              </section>
             </div>
-            <label>Объект<select id="managerObject" required></select></label>
-            <label>Место<input id="managerLocation" required /></label>
-            <label
-              >Название<input id="managerTitle" minlength="3" maxlength="160" required
-            /></label>
-            <label>Описание<textarea id="managerDescription"></textarea></label>
-            <label
-              >Фото<input id="managerPhotos" type="file" accept="image/jpeg,image/webp" multiple
-            /></label>
-            <div id="managerPhotoPreview" class="managerPhotoPreview"></div>
-            <div class="managerFormSection">
-              <div class="managerFormHead">
-                <h3>Этапы</h3>
-                <button type="button" class="secondaryButton" data-add-manager-step>
-                  Добавить этап
+
+            <footer class="managerFormActions">
+              <button class="managerCancelButton" type="button" data-close-manager-form>
+                Отмена
+              </button>
+              <button id="managerSubmitButton" class="managerSubmitButton" type="submit">
+                <span class="managerSubmitIcon" aria-hidden="true">✓</span>
+                <span data-manager-submit-text>Поставить задачу</span>
+                <span class="managerSubmitSpinner" aria-hidden="true"></span>
+              </button>
+            </footer>
+          </form>
+
+          <div id="managerFormConfirm" class="managerFormConfirm" hidden>
+            <section
+              class="managerConfirmCard"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="managerConfirmTitle"
+              aria-describedby="managerConfirmText"
+            >
+              <span class="managerConfirmIcon" aria-hidden="true">?</span>
+              <h3 id="managerConfirmTitle">Подтвердите действие</h3>
+              <p id="managerConfirmText"></p>
+              <div id="managerConfirmSummary" class="managerConfirmSummary" hidden></div>
+              <div class="managerConfirmActions">
+                <button type="button" class="managerConfirmBack" data-manager-confirm-back>
+                  Вернуться
+                </button>
+                <button type="button" class="managerConfirmSubmit" data-manager-confirm-submit>
+                  Подтвердить
                 </button>
               </div>
-              <div id="managerSteps"></div>
-            </div>
-            <fieldset>
-              <legend>Приоритет</legend>
-              <label
-                ><input type="radio" name="managerPriority" value="NORMAL" checked /> Обычная</label
-              ><label><input type="radio" name="managerPriority" value="URGENT" /> Срочная</label>
-            </fieldset>
-            <fieldset>
-              <legend>Доступ</legend>
-              <label
-                ><input type="radio" name="managerAccess" value="OPEN" checked /> Открытая</label
-              ><label><input type="radio" name="managerAccess" value="CLOSED" /> Закрытая</label>
-            </fieldset>
-            <label>Исполнитель<select id="managerWorker" required></select></label>
-            <label
-              >Номер задачи<input
-                id="managerPosition"
-                type="number"
-                min="1"
-                step="1"
-                value="1"
-                required
-            /></label>
-            <button class="primaryButton" type="submit">Поставить задачу</button>
-          </form>
+            </section>
+          </div>
         </section>
       </div>
 

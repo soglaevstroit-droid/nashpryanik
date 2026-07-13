@@ -68,6 +68,8 @@ export class TaskRepository {
     taskId: string,
     client: Prisma.TransactionClient = this.prisma,
   ): Promise<number> {
-    return client.taskStep.count({ where: { taskId, status: { not: 'COMPLETED' } } });
+    return client.taskStep.count({
+      where: { taskId, deletedAt: null, status: { not: 'COMPLETED' } },
+    });
   }
 }

@@ -32,14 +32,14 @@ export class TaskStepRepository {
     id: string,
     client: Prisma.TransactionClient = this.prisma,
   ): Promise<TaskStepRecord | null> {
-    return client.taskStep.findUnique({
-      where: { id },
+    return client.taskStep.findFirst({
+      where: { id, deletedAt: null },
     });
   }
 
   findManyByTaskId(taskId: string, limit: number): Promise<TaskStepRecord[]> {
     return this.prisma.taskStep.findMany({
-      where: { taskId },
+      where: { taskId, deletedAt: null },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
       take: limit,
     });

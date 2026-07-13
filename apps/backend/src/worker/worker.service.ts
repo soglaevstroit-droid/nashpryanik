@@ -23,7 +23,7 @@ export class WorkerService {
             status: { notIn: ['COMPLETED', 'CANCELLED'] },
           },
           orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
-          include: { steps: { orderBy: [{ order: 'asc' }] } },
+          include: { steps: { where: { deletedAt: null }, orderBy: [{ order: 'asc' }] } },
         },
       },
     });
@@ -67,7 +67,7 @@ export class WorkerService {
       where: { id: taskId, assigneeId: user.id, deletedAt: null },
       include: {
         object: { select: { id: true, name: true } },
-        steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] },
+        steps: { where: { deletedAt: null }, orderBy: [{ order: 'asc' }, { id: 'asc' }] },
         messages: { orderBy: { createdAt: 'asc' } },
       },
     });

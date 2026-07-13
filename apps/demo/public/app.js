@@ -1,4 +1,4 @@
-/* global CameraUtils, Headers, File, PhotoSlider, URL, crypto, navigator, sessionStorage */
+/* global CameraUtils, Headers, HTMLElement, File, PhotoSlider, URL, crypto, navigator, sessionStorage */
 
 const authTokenStorageKey = 'stroit.demo.accessToken';
 const legacyShiftStorageKey = 'stroit.demo.shiftOpen';
@@ -6,6 +6,8 @@ const legacyShiftStateStorageKey = 'stroit.demo.shiftState';
 const workerEmail = 'ilya';
 const managerPhotoMaxBytes = 8 * 1024 * 1024;
 const managerPhotosMaxBytes = 96 * 1024 * 1024;
+const managerPhotoMaxCount = 12;
+const managerAllowedPhotoTypes = new Set(['image/jpeg', 'image/webp']);
 
 const steps = [
   {
@@ -57,7 +59,21 @@ let pendingCameraMode = null;
 let currentSection = 'tasks';
 let previousWorkingSection = 'tasks';
 let managerSelectedFiles = [];
+let managerPhotoPreviewUrls = [];
 let managerStepCount = 0;
+let managerPendingConfirmation = null;
+let managerDraftOperationId = null;
+let managerTaskSubmitting = false;
+let managerWorkersAvailable = false;
+let managerFormReturnFocus = null;
+let managerConfirmReturnFocus = null;
+let managerInitialObjectId = null;
+let managerInitialWorkerId = null;
+let managerFormMode = 'create';
+let managerEditingTask = null;
+let managerExistingPhotos = [];
+let managerRemovedPhotoIds = [];
+let managerExistingPhotoUrls = [];
 let pendingStepCompletionId = null;
 let taskCompletionOperationId = null;
 let cameraAttempt = {
@@ -225,6 +241,20 @@ const elements = {
   managerSteps: document.querySelector('#managerSteps'),
   managerPhotos: document.querySelector('#managerPhotos'),
   managerPhotoPreview: document.querySelector('#managerPhotoPreview'),
+  managerPhotoCount: document.querySelector('#managerPhotoCount'),
+  managerPhotoSize: document.querySelector('#managerPhotoSize'),
+  managerPhotoError: document.querySelector('#managerPhotoError'),
+  managerFormError: document.querySelector('#managerFormError'),
+  managerSubmitButton: document.querySelector('#managerSubmitButton'),
+  managerDialogTitle: document.querySelector('#managerTaskTitle'),
+  managerDialogSubtitle: document.querySelector('.managerDialogHeader p'),
+  managerReasonField: document.querySelector('#managerReasonField'),
+  managerEditReason: document.querySelector('#managerEditReason'),
+  managerFormConfirm: document.querySelector('#managerFormConfirm'),
+  managerConfirmTitle: document.querySelector('#managerConfirmTitle'),
+  managerConfirmText: document.querySelector('#managerConfirmText'),
+  managerConfirmSummary: document.querySelector('#managerConfirmSummary'),
+  managerConfirmSubmit: document.querySelector('[data-manager-confirm-submit]'),
   taskDetailProgressLine: document.querySelector('#taskDetailProgressLine'),
   taskDetailProgressPercent: document.querySelector('#taskDetailProgressPercent'),
   taskDetailProgressCount: document.querySelector('#taskDetailProgressCount'),
@@ -276,9 +306,15 @@ elements.loginForm.addEventListener('submit', async (event) => {
 });
 elements.historyMoreButton.addEventListener('click', () => loadHistory(false));
 elements.managerTaskForm.addEventListener('submit', submitManagerTask);
-elements.managerPhotos.addEventListener('change', () => {
-  managerSelectedFiles = Array.from(elements.managerPhotos.files ?? []);
-  renderManagerPhotoPreview();
+elements.managerPhotos.addEventListener('change', handleManagerPhotoSelection);
+elements.managerTaskForm.addEventListener('input', clearManagerFormError);
+elements.managerTaskForm.addEventListener('keydown', (event) => {
+  if (
+    event.key === 'Enter' &&
+    event.target.tagName !== 'TEXTAREA' &&
+    event.target.tagName !== 'BUTTON'
+  )
+    event.preventDefault();
 });
 document.addEventListener('change', (event) => {
   const control = event.target.closest?.('[data-manager-update]');
@@ -319,8 +355,14 @@ document.addEventListener('click', async (event) => {
   const addManagerStepButton = event.target.closest('[data-add-manager-step]');
   const removeManagerStepButton = event.target.closest('[data-remove-manager-step]');
   const removeManagerPhotoButton = event.target.closest('[data-remove-manager-photo]');
+  const removeExistingPhotoButton = event.target.closest('[data-remove-existing-photo]');
+  const openManagerPhotosButton = event.target.closest('[data-open-manager-photos]');
   const closeManagerFormButton = event.target.closest('[data-close-manager-form]');
+  const managerConfirmBackButton = event.target.closest('[data-manager-confirm-back]');
+  const managerConfirmSubmitButton = event.target.closest('[data-manager-confirm-submit]');
   const managerDeleteButton = event.target.closest('[data-manager-delete]');
+  const managerEditButton = event.target.closest('[data-manager-edit]');
+  const moveManagerStepButton = event.target.closest('[data-move-manager-step]');
   const chooseAnotherTaskButton = event.target.closest('[data-choose-another-task]');
   const goToHistoryButton = event.target.closest('[data-go-to-history]');
   const confirmCompleteStepButton = event.target.closest('[data-confirm-complete-step]');
@@ -336,16 +378,34 @@ document.addEventListener('click', async (event) => {
     navigateSection(previousWorkingSection || 'tasks');
     return;
   }
-  if (addManagerStepButton) return addManagerStep();
+  if (addManagerStepButton) return addManagerStep({ focus: true });
   if (removeManagerStepButton)
     return removeManagerStep(removeManagerStepButton.closest('.managerStepFields'));
-  if (removeManagerPhotoButton) {
-    managerSelectedFiles.splice(Number(removeManagerPhotoButton.dataset.removeManagerPhoto), 1);
-    renderManagerPhotoPreview();
+  if (moveManagerStepButton)
+    return moveManagerStep(
+      moveManagerStepButton.closest('.managerStepFields'),
+      moveManagerStepButton.dataset.moveManagerStep,
+    );
+  if (openManagerPhotosButton) {
+    elements.managerPhotos.click();
     return;
   }
+  if (removeManagerPhotoButton) {
+    managerSelectedFiles.splice(Number(removeManagerPhotoButton.dataset.removeManagerPhoto), 1);
+    clearManagerPhotoError();
+    void renderManagerPhotoPreview();
+    return;
+  }
+  if (removeExistingPhotoButton) {
+    managerRemovedPhotoIds.push(removeExistingPhotoButton.dataset.removeExistingPhoto);
+    void renderManagerPhotoPreview();
+    return;
+  }
+  if (managerConfirmBackButton) return hideManagerConfirmation();
+  if (managerConfirmSubmitButton) return confirmManagerAction();
   if (closeManagerFormButton) return closeManagerForm();
   if (managerDeleteButton) return deleteManagerTask();
+  if (managerEditButton) return openManagerTaskForm(selectedTask);
   if (chooseAnotherTaskButton) {
     selectedTask = null;
     selectedTaskId = null;
@@ -521,6 +581,18 @@ document.addEventListener('click', async (event) => {
 });
 
 document.addEventListener('keydown', async (event) => {
+  if (modals.managerTask.classList.contains('is-active')) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (!elements.managerFormConfirm.hidden) hideManagerConfirmation();
+      else closeManagerForm();
+      return;
+    }
+    if (event.key === 'Tab') {
+      trapManagerDialogFocus(event);
+      return;
+    }
+  }
   if (!['Enter', ' '].includes(event.key)) return;
   const taskCard = event.target.closest('[data-worker-task-id]');
   if (!taskCard) return;
@@ -603,6 +675,19 @@ async function showWorkspace() {
     return true;
   }
 
+  if (!isWorker()) {
+    configureBottomNavigation();
+    elements.userInfo.textContent = currentUser?.name ?? currentUser?.role ?? 'Пользователь';
+    elements.loginScreen.hidden = true;
+    elements.loginScreen.classList.remove('is-active');
+    elements.workspaceScreen.hidden = false;
+    currentSection = 'tasks';
+    previousWorkingSection = 'tasks';
+    openView('maintenance');
+    updateBottomNavigation();
+    return true;
+  }
+
   const isSynced = await refreshShiftState();
 
   if (!isSynced) {
@@ -650,6 +735,12 @@ function openView(name, options = {}) {
 }
 
 function navigateSection(section) {
+  if (!isManager() && !isWorker()) {
+    currentSection = section;
+    openView('maintenance');
+    updateBottomNavigation();
+    return;
+  }
   if (section === 'order' && isManager()) {
     currentSection = 'order';
     updateBottomNavigation();
@@ -682,6 +773,10 @@ function navigateSection(section) {
 
 function isManager() {
   return ['FOREMAN', 'DIRECTOR', 'CREATOR'].includes(currentUser?.role);
+}
+
+function isWorker() {
+  return currentUser?.role === 'WORKER';
 }
 
 function configureBottomNavigation() {
@@ -727,6 +822,7 @@ function openModal(name) {
   elements.modalLayer.classList.remove('is-closing');
   elements.modalLayer.classList.toggle('is-task-status-modal', name === 'taskStatusConfirm');
   elements.modalLayer.classList.toggle('is-camera-modal', name === 'shiftCamera');
+  elements.modalLayer.classList.toggle('is-manager-task-modal', name === 'managerTask');
   elements.helpRequestInput.value = '';
   elements.helpRequestError.hidden = true;
 
@@ -736,6 +832,8 @@ function openModal(name) {
   }
 
   elements.modalLayer.hidden = false;
+  if (name === 'managerTask')
+    window.requestAnimationFrame(() => modals.managerTask.focus({ preventScroll: true }));
 }
 
 function closeModal() {
@@ -755,7 +853,12 @@ function closeModal() {
   modalCloseTimer = window.setTimeout(() => {
     elements.modalLayer.hidden = true;
     document.body.classList.remove('is-modal-open');
-    elements.modalLayer.classList.remove('is-closing', 'is-task-status-modal', 'is-camera-modal');
+    elements.modalLayer.classList.remove(
+      'is-closing',
+      'is-task-status-modal',
+      'is-camera-modal',
+      'is-manager-task-modal',
+    );
 
     for (const modal of Object.values(modals)) {
       modal.classList.remove('is-active', 'is-closing');
@@ -943,11 +1046,24 @@ async function loadManagerTasks() {
   photoSlider.mount(elements.workerObjectsList);
 }
 
-async function openManagerTaskForm() {
-  const [objectsResponse, workersResponse] = await Promise.all([
-    apiFetch('/api/v1/manager/objects'),
-    apiFetch('/api/v1/manager/workers'),
-  ]);
+async function openManagerTaskForm(task = null) {
+  managerFormReturnFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : elements.orderNavButton;
+  let objectsResponse;
+  let workersResponse;
+  try {
+    [objectsResponse, workersResponse] = await Promise.all([
+      apiFetch('/api/v1/manager/objects'),
+      apiFetch('/api/v1/manager/workers'),
+    ]);
+  } catch {
+    currentSection = 'tasks';
+    updateBottomNavigation();
+    showMessage('Не удалось загрузить форму. Проверьте соединение и повторите попытку.');
+    return;
+  }
   const objects = await readResponseBody(objectsResponse);
   const workers = await readResponseBody(workersResponse);
   if (!objectsResponse.ok || !workersResponse.ok) return showMessage('Не удалось загрузить форму');
@@ -959,65 +1075,494 @@ async function openManagerTaskForm() {
         .map((item) => `<option value="${item.id}">${escapeHtml(item.name || item.email)}</option>`)
         .join('')
     : '<option value="">Нет доступных исполнителей</option>';
-  elements.managerTaskForm.querySelector('button[type="submit"]').disabled = !workers.length;
+  managerWorkersAvailable = workers.length > 0;
+  clearManagerPhotoPreviews();
   elements.managerTaskForm.reset();
+  elements.managerTaskForm.classList.remove('was-validated');
+  managerInitialObjectId = elements.managerObject.value;
+  managerInitialWorkerId = elements.managerWorker.value;
   managerSelectedFiles = [];
+  managerFormMode = task ? 'edit' : 'create';
+  managerEditingTask = task ? JSON.parse(JSON.stringify(task)) : null;
+  managerExistingPhotos = task ? task.photos.filter((photo) => !photo.taskStepId) : [];
+  managerRemovedPhotoIds = [];
+  managerDraftOperationId = crypto.randomUUID();
+  managerTaskSubmitting = false;
+  managerPendingConfirmation = null;
+  elements.managerFormConfirm.hidden = true;
+  clearManagerFormError();
+  clearManagerPhotoError();
   managerStepCount = 0;
   elements.managerSteps.innerHTML = '';
-  addManagerStep();
-  renderManagerPhotoPreview();
+  elements.managerDialogTitle.textContent = task ? 'Редактировать задачу' : 'Поставить задачу';
+  elements.managerDialogSubtitle.textContent = task
+    ? 'Внесите необходимые изменения'
+    : 'Создайте новую задачу для монтажника';
+  elements.managerTaskForm
+    .querySelector('[data-close-manager-form]')
+    .setAttribute(
+      'aria-label',
+      task ? 'Закрыть форму редактирования задачи' : 'Закрыть форму постановки задачи',
+    );
+  elements.managerReasonField.hidden =
+    !task || !['ACCEPTED', 'IN_PROGRESS', 'PAUSED'].includes(task.status);
+  elements.managerEditReason.required = !elements.managerReasonField.hidden;
+  elements.managerEditReason.setAttribute(
+    'aria-required',
+    String(elements.managerEditReason.required),
+  );
+  if (task) {
+    elements.managerObject.value = task.objectId ?? '';
+    elements.managerWorker.value = task.assigneeId ?? '';
+    document.querySelector('#managerLocation').value = task.location ?? '';
+    document.querySelector('#managerTitle').value = task.title ?? '';
+    document.querySelector('#managerDescription').value = task.description ?? '';
+    document.querySelector('#managerPosition').value = String(task.position ?? 1);
+    elements.managerTaskForm.querySelector(
+      `input[name="managerPriority"][value="${task.priority}"]`,
+    ).checked = true;
+    elements.managerTaskForm.querySelector(
+      `input[name="managerAccess"][value="${task.accessStatus}"]`,
+    ).checked = true;
+    if (['ACCEPTED', 'IN_PROGRESS', 'PAUSED'].includes(task.status))
+      elements.managerObject.disabled = true;
+    if (task.status === 'IN_PROGRESS') elements.managerWorker.disabled = true;
+    task.steps.forEach((step) => addManagerStep({ focus: false, step }));
+  } else addManagerStep({ focus: false });
+  await renderManagerPhotoPreview();
+  setManagerSubmitting(false);
   openModal('managerTask');
 }
 
-function addManagerStep() {
+function addManagerStep({ focus = true, step = null } = {}) {
   managerStepCount += 1;
+  const fieldId = `managerStep-${managerStepCount}`;
   elements.managerSteps.insertAdjacentHTML(
     'beforeend',
-    `<section class="managerStepFields"><strong>Этап <span>${managerStepCount}</span></strong><label>Название<input data-manager-step-title required /></label><label>Описание<textarea data-manager-step-description required></textarea></label><button type="button" class="secondaryButton" data-remove-manager-step>Удалить этап</button></section>`,
+    `<article class="managerStepFields ${step?.status === 'COMPLETED' ? 'is-readonly' : ''}" data-manager-step-card data-step-id="${step?.id ?? ''}" data-step-status="${step?.status ?? 'NEW'}">
+      <header class="managerStepHeader">
+        <div><span class="managerStepNumber">${managerStepCount}</span><strong>Этап <span data-manager-step-order>${managerStepCount}</span></strong></div>
+        <div class="managerStepTools">
+          <button type="button" class="managerMoveStepButton" data-move-manager-step="up" aria-label="Переместить этап выше">↑</button>
+          <button type="button" class="managerMoveStepButton" data-move-manager-step="down" aria-label="Переместить этап ниже">↓</button>
+          <button type="button" class="managerRemoveStepButton" data-remove-manager-step aria-label="Удалить этап ${managerStepCount}"><span aria-hidden="true">⌫</span></button>
+        </div>
+      </header>
+      <label class="managerField" for="${fieldId}-title">
+        <span class="managerFieldLabel">Название этапа <i class="requiredMark" aria-hidden="true">*</i></span>
+        <input id="${fieldId}-title" data-manager-step-title required aria-required="true" placeholder="Название этапа" value="${escapeHtml(step?.title ?? '')}" ${step?.status === 'COMPLETED' ? 'readonly' : ''} />
+      </label>
+      <label class="managerField" for="${fieldId}-description">
+        <span class="managerFieldLabel">Описание работ <i class="requiredMark" aria-hidden="true">*</i></span>
+        <textarea id="${fieldId}-description" data-manager-step-description required aria-required="true" placeholder="Описание работ на этапе…" ${step?.status === 'COMPLETED' ? 'readonly' : ''}>${escapeHtml(step?.description ?? '')}</textarea>
+      </label>
+      ${step?.status === 'COMPLETED' ? '<small class="managerStepReadonlyNote">Выполненный этап защищён от изменений</small>' : ''}
+    </article>`,
   );
   renumberManagerSteps();
+  const card = elements.managerSteps.lastElementChild;
+  if (focus && card) {
+    window.requestAnimationFrame(() => {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.querySelector('[data-manager-step-title]')?.focus({ preventScroll: true });
+    });
+  }
 }
 
 function removeManagerStep(step) {
   if (elements.managerSteps.children.length === 1)
     return showMessage('Минимум один этап обязателен');
-  step?.remove();
+  if (!step) return;
+  const title = step.querySelector('[data-manager-step-title]')?.value.trim();
+  const description = step.querySelector('[data-manager-step-description]')?.value.trim();
+  if (title || description) {
+    const order = step.querySelector('[data-manager-step-order]')?.textContent ?? '';
+    showManagerConfirmation({
+      type: 'deleteStep',
+      title: 'Удалить этап?',
+      text:
+        step.dataset.stepStatus === 'IN_PROGRESS'
+          ? 'Этап находится в работе. Его удаление изменит текущий рабочий процесс сотрудника. Укажите причину изменений перед сохранением.'
+          : 'Введённые данные этого этапа будут удалены.',
+      summaryRows: [['Этап', order], ...(title ? [['Название', title]] : [])],
+      confirmLabel: 'Удалить этап',
+      backLabel: 'Отмена',
+      danger: true,
+      step,
+    });
+    return;
+  }
+  removeManagerStepImmediately(step);
+}
+
+function removeManagerStepImmediately(step) {
+  step.remove();
   renumberManagerSteps();
 }
 
 function renumberManagerSteps() {
-  [...elements.managerSteps.children].forEach((step, index) => {
-    step.querySelector('strong span').textContent = index + 1;
+  const cards = [...elements.managerSteps.children];
+  cards.forEach((step, index) => {
+    const order = index + 1;
+    step.querySelector('[data-manager-step-order]').textContent = order;
+    step.querySelector('.managerStepNumber').textContent = order;
+    const removeButton = step.querySelector('[data-remove-manager-step]');
+    const isCompleted = step.dataset.stepStatus === 'COMPLETED';
+    removeButton.hidden = cards.length === 1 || isCompleted;
+    removeButton.setAttribute('aria-label', `Удалить этап ${order}`);
+    const current = cards.find((candidate) => candidate.dataset.stepStatus === 'IN_PROGRESS');
+    const moveable = managerFormMode === 'edit' && !isCompleted && step !== current;
+    const futureCards = cards.filter(
+      (candidate) => candidate.dataset.stepStatus !== 'COMPLETED' && candidate !== current,
+    );
+    const futureIndex = futureCards.indexOf(step);
+    const [up, down] = step.querySelectorAll('[data-move-manager-step]');
+    up.hidden = !moveable;
+    down.hidden = !moveable;
+    up.disabled = futureIndex <= 0;
+    down.disabled = futureIndex < 0 || futureIndex >= futureCards.length - 1;
   });
 }
 
-function renderManagerPhotoPreview() {
-  elements.managerPhotoPreview.innerHTML = managerSelectedFiles
+function moveManagerStep(step, direction) {
+  if (!step || step.dataset.stepStatus === 'COMPLETED' || step.dataset.stepStatus === 'IN_PROGRESS')
+    return;
+  const cards = [...elements.managerSteps.children];
+  const moveable = cards.filter(
+    (candidate) => !['COMPLETED', 'IN_PROGRESS'].includes(candidate.dataset.stepStatus),
+  );
+  const index = moveable.indexOf(step);
+  const target = moveable[index + (direction === 'up' ? -1 : 1)];
+  if (!target) return;
+  if (direction === 'up') elements.managerSteps.insertBefore(step, target);
+  else elements.managerSteps.insertBefore(target, step);
+  renumberManagerSteps();
+}
+
+function handleManagerPhotoSelection() {
+  clearManagerPhotoError();
+  const selected = Array.from(elements.managerPhotos.files ?? []);
+  elements.managerPhotos.value = '';
+  if (!selected.length) return;
+  const unsupported = selected.find((file) => !managerAllowedPhotoTypes.has(file.type));
+  if (unsupported) {
+    showManagerPhotoError(`Файл «${unsupported.name}» не поддерживается. Выберите JPEG или WebP.`);
+    return;
+  }
+  const oversized = selected.find((file) => file.size > managerPhotoMaxBytes);
+  if (oversized) {
+    showManagerPhotoError(`Фото «${oversized.name}» превышает лимит 8 МБ.`);
+    return;
+  }
+  const nextFiles = [...managerSelectedFiles, ...selected];
+  if (nextFiles.length > managerPhotoMaxCount) {
+    showManagerPhotoError(`Можно добавить не более ${managerPhotoMaxCount} фотографий.`);
+    return;
+  }
+  const totalSize = nextFiles.reduce((total, file) => total + file.size, 0);
+  if (totalSize > managerPhotosMaxBytes) {
+    showManagerPhotoError('Общий размер фотографий превышает лимит 96 МБ.');
+    return;
+  }
+  managerSelectedFiles = nextFiles;
+  void renderManagerPhotoPreview();
+}
+
+async function renderManagerPhotoPreview() {
+  clearManagerPhotoPreviews();
+  managerPhotoPreviewUrls = managerSelectedFiles.map((file) => URL.createObjectURL(file));
+  const visibleExisting = managerExistingPhotos.filter(
+    (photo) => !managerRemovedPhotoIds.includes(photo.id),
+  );
+  const existingPreviews = await Promise.all(
+    visibleExisting.map(async (photo) => {
+      try {
+        const response = await apiFetch(`/api/v1/artifacts/${photo.id}`);
+        if (!response.ok) return null;
+        const url = URL.createObjectURL(await response.blob());
+        managerExistingPhotoUrls.push(url);
+        return url;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const existingHtml = visibleExisting
     .map(
-      (file, index) =>
-        `<figure><img src="${URL.createObjectURL(file)}" alt="${escapeHtml(file.name)}" /><button type="button" data-remove-manager-photo="${index}" aria-label="Удалить фото">×</button></figure>`,
+      (photo, index) =>
+        `<figure>${existingPreviews[index] ? `<img src="${existingPreviews[index]}" alt="Исходное фото: ${escapeHtml(photo.originalFileName)}" />` : '<span class="managerPhotoUnavailable">Фото недоступно</span>'}<figcaption title="${escapeHtml(photo.originalFileName)}">${escapeHtml(photo.originalFileName)}</figcaption><button type="button" data-remove-existing-photo="${photo.id}" aria-label="Убрать исходное фото ${index + 1}">×</button></figure>`,
     )
     .join('');
+  const newHtml = managerSelectedFiles
+    .map(
+      (file, index) =>
+        `<figure><img src="${managerPhotoPreviewUrls[index]}" alt="Предпросмотр: ${escapeHtml(file.name)}" /><figcaption title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</figcaption><button type="button" data-remove-manager-photo="${index}" aria-label="Удалить фото ${index + 1}">×</button></figure>`,
+    )
+    .join('');
+  elements.managerPhotoPreview.innerHTML = existingHtml + newHtml;
+  elements.managerPhotoPreview.hidden = !visibleExisting.length && !managerSelectedFiles.length;
+  const totalSize = managerSelectedFiles.reduce((total, file) => total + file.size, 0);
+  elements.managerPhotoCount.textContent = `Фото: ${visibleExisting.length + managerSelectedFiles.length} (новых ${managerSelectedFiles.length})`;
+  elements.managerPhotoSize.textContent = formatManagerFileSize(totalSize);
+}
+
+function clearManagerPhotoPreviews() {
+  for (const url of managerPhotoPreviewUrls) URL.revokeObjectURL(url);
+  for (const url of managerExistingPhotoUrls) URL.revokeObjectURL(url);
+  managerPhotoPreviewUrls = [];
+  managerExistingPhotoUrls = [];
+}
+
+function formatManagerFileSize(bytes) {
+  if (!bytes) return '0 МБ';
+  return `${(bytes / 1024 / 1024).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} МБ`;
+}
+
+function showManagerPhotoError(message) {
+  elements.managerPhotoError.textContent = message;
+  elements.managerPhotoError.hidden = false;
+}
+
+function clearManagerPhotoError() {
+  elements.managerPhotoError.textContent = '';
+  elements.managerPhotoError.hidden = true;
 }
 
 function closeManagerForm() {
-  const dirty =
-    elements.managerTaskForm.querySelector('input:not([type="radio"]):not([type="file"])')?.value ||
-    managerSelectedFiles.length;
-  if (dirty && !window.confirm('Закрыть окно? Введённые данные будут потеряны.')) return;
+  if (managerTaskSubmitting) return;
+  if (isManagerFormDirty()) {
+    showManagerConfirmation({
+      type: 'discard',
+      title: 'Закрыть форму?',
+      text: 'Введённые данные будут потеряны.',
+      confirmLabel: 'Закрыть',
+      backLabel: 'Продолжить заполнение',
+      danger: true,
+    });
+    return;
+  }
+  finishManagerForm();
+}
+
+function isManagerFormDirty() {
+  if (managerFormMode === 'edit') return buildManagerEditChanges().length > 0;
+  const hasText = [
+    '#managerLocation',
+    '#managerTitle',
+    '#managerDescription',
+    '[data-manager-step-title]',
+    '[data-manager-step-description]',
+  ].some((selector) => elements.managerTaskForm.querySelector(selector)?.value.trim());
+  const priority = new FormData(elements.managerTaskForm).get('managerPriority');
+  const access = new FormData(elements.managerTaskForm).get('managerAccess');
+  const position = document.querySelector('#managerPosition').value;
+  return Boolean(
+    hasText ||
+    managerSelectedFiles.length ||
+    elements.managerSteps.children.length > 1 ||
+    priority !== 'NORMAL' ||
+    access !== 'OPEN' ||
+    position !== '1' ||
+    elements.managerObject.value !== managerInitialObjectId ||
+    elements.managerWorker.value !== managerInitialWorkerId,
+  );
+}
+
+function finishManagerForm() {
+  hideManagerConfirmation({ restoreFocus: false });
+  clearManagerPhotoPreviews();
+  managerSelectedFiles = [];
+  managerDraftOperationId = null;
+  managerTaskSubmitting = false;
+  managerInitialObjectId = null;
+  managerInitialWorkerId = null;
+  managerFormMode = 'create';
+  managerEditingTask = null;
+  managerExistingPhotos = [];
+  managerRemovedPhotoIds = [];
   closeModal();
   currentSection = 'tasks';
   updateBottomNavigation();
+  const returnFocus = managerFormReturnFocus ?? elements.orderNavButton;
+  managerFormReturnFocus = null;
+  window.setTimeout(() => returnFocus?.focus({ preventScroll: true }), 210);
 }
 
 async function submitManagerTask(event) {
   event.preventDefault();
+  if (managerTaskSubmitting) return;
+  clearManagerFormError();
+  const titleInput = document.querySelector('#managerTitle');
+  const locationInput = document.querySelector('#managerLocation');
+  const positionInput = document.querySelector('#managerPosition');
+  locationInput.setCustomValidity(locationInput.value.trim() ? '' : 'Укажите место выполнения.');
+  titleInput.setCustomValidity(
+    titleInput.value.trim().length >= 3 ? '' : 'Введите минимум 3 символа.',
+  );
+  const position = Number(positionInput.value);
+  positionInput.setCustomValidity(
+    Number.isInteger(position) && position > 0 ? '' : 'Введите положительное целое число.',
+  );
+  for (const step of elements.managerSteps.children) {
+    const stepTitle = step.querySelector('[data-manager-step-title]');
+    const stepDescription = step.querySelector('[data-manager-step-description]');
+    stepTitle.setCustomValidity(stepTitle.value.trim() ? '' : 'Укажите название этапа.');
+    stepDescription.setCustomValidity(
+      stepDescription.value.trim() ? '' : 'Добавьте описание работ на этапе.',
+    );
+  }
+  elements.managerTaskForm.classList.add('was-validated');
+  if (!elements.managerTaskForm.checkValidity()) {
+    elements.managerTaskForm.reportValidity();
+    elements.managerTaskForm.querySelector(':invalid')?.focus();
+    return;
+  }
   const steps = [...elements.managerSteps.children].map((step) => ({
+    ...(step.dataset.stepId ? { id: step.dataset.stepId } : {}),
     title: step.querySelector('[data-manager-step-title]').value.trim(),
     description: step.querySelector('[data-manager-step-description]').value.trim(),
   }));
   const payload = {
-    operationId: crypto.randomUUID(),
+    operationId: managerDraftOperationId ?? crypto.randomUUID(),
+    objectId: elements.managerObject.value,
+    assigneeId: elements.managerWorker.value,
+    title: titleInput.value.trim(),
+    description: document.querySelector('#managerDescription').value.trim(),
+    location: document.querySelector('#managerLocation').value.trim(),
+    priority: new FormData(elements.managerTaskForm).get('managerPriority'),
+    accessStatus: new FormData(elements.managerTaskForm).get('managerAccess'),
+    position,
+    steps,
+    ...(managerFormMode === 'edit'
+      ? {
+          updatedAt: managerEditingTask.updatedAt,
+          reason: elements.managerEditReason.value.trim(),
+          removedPhotoIds: managerRemovedPhotoIds,
+        }
+      : {}),
+  };
+  const objectName = elements.managerObject.selectedOptions[0]?.textContent.trim() ?? '—';
+  const workerName = elements.managerWorker.selectedOptions[0]?.textContent.trim() ?? '—';
+  const editChanges = managerFormMode === 'edit' ? buildManagerEditChanges(payload) : [];
+  if (managerFormMode === 'edit' && !editChanges.length) {
+    showMessage('Изменений нет.');
+    return;
+  }
+  showManagerConfirmation({
+    type: 'submitTask',
+    title: managerFormMode === 'edit' ? 'Сохранить изменения?' : 'Поставить задачу?',
+    text:
+      managerFormMode === 'edit'
+        ? 'Сотрудник получит уведомление с причиной и перечнем изменений.'
+        : 'Проверьте параметры перед отправкой монтажнику.',
+    summaryRows:
+      managerFormMode === 'edit'
+        ? editChanges.map((change) => ['Изменение', change])
+        : [
+            ['Объект', objectName],
+            ['Место', payload.location],
+            ['Название', payload.title],
+            ['Исполнитель', workerName],
+            ['Фотографии', String(managerSelectedFiles.length)],
+            ['Этапы', String(steps.length)],
+            ['Приоритет', payload.priority === 'URGENT' ? 'Срочная' : 'Обычная'],
+            ['Доступ', payload.accessStatus === 'CLOSED' ? 'Закрытая' : 'Открытая'],
+            ['Позиция', String(payload.position)],
+          ],
+    confirmLabel: managerFormMode === 'edit' ? 'Сохранить изменения' : 'Да, поставить',
+    backLabel: 'Вернуться',
+    payload,
+  });
+}
+
+async function sendManagerTask(payload) {
+  const oversizedPhoto = managerSelectedFiles.find((file) => file.size > managerPhotoMaxBytes);
+  if (oversizedPhoto) {
+    showManagerPhotoError(`Фото «${oversizedPhoto.name}» превышает лимит 8 МБ.`);
+    return;
+  }
+  const photosSize = managerSelectedFiles.reduce((total, file) => total + file.size, 0);
+  if (photosSize > managerPhotosMaxBytes) {
+    showManagerPhotoError('Общий размер фотографий превышает лимит 96 МБ.');
+    return;
+  }
+  setManagerSubmitting(true);
+  const data = new FormData();
+  data.append('payload', JSON.stringify(payload));
+  managerSelectedFiles.forEach((file) => data.append('photos', file));
+  let response;
+  let body;
+  try {
+    const editing = managerFormMode === 'edit';
+    response = await apiFetch(
+      editing ? `/api/v1/manager/tasks/${managerEditingTask.id}/edit` : '/api/v1/manager/tasks',
+      { method: editing ? 'PATCH' : 'POST', body: data },
+    );
+    body = await readResponseBody(response);
+  } catch {
+    setManagerSubmitting(false);
+    showManagerFormError('Не удалось отправить задачу. Проверьте соединение и повторите попытку.');
+    return;
+  }
+  if (response.status === 409 && getApiMessage(body)?.includes('уже есть задача')) {
+    setManagerSubmitting(false);
+    showManagerConfirmation({
+      type: 'forceUrgent',
+      title: 'У сотрудника есть задача в работе',
+      text: `${getApiMessage(body)} Всё равно поставить срочную задачу?`,
+      confirmLabel: 'Всё равно поставить',
+      backLabel: 'Вернуться',
+      payload,
+    });
+    return;
+  }
+  if (!response.ok) {
+    setManagerSubmitting(false);
+    showManagerFormError(managerTaskApiError(response.status, body));
+    return;
+  }
+  const editing = managerFormMode === 'edit';
+  finishManagerForm();
+  await loadManagerTasks();
+  if (editing && selectedTaskId) await reloadTaskDetails();
+  showMessage(editing ? 'Изменения сохранены. Сотрудник уведомлён.' : 'Задача поставлена');
+}
+
+function managerTaskApiError(status, body) {
+  if (status === 413)
+    return 'Фотографии превышают допустимый общий размер. Удалите часть файлов или выберите изображения меньшего размера.';
+  const message = getApiMessage(body);
+  if (message && !/<[a-z][\s\S]*>/i.test(message)) return message;
+  return managerFormMode === 'edit'
+    ? 'Не удалось сохранить изменения. Проверьте соединение и повторите попытку.'
+    : 'Не удалось поставить задачу. Проверьте соединение и повторите попытку.';
+}
+
+function setManagerSubmitting(submitting) {
+  managerTaskSubmitting = submitting;
+  for (const control of elements.managerTaskForm.querySelectorAll(
+    'input, select, textarea, button',
+  ))
+    control.disabled = submitting;
+  if (!submitting && managerFormMode === 'edit' && managerEditingTask) {
+    if (['ACCEPTED', 'IN_PROGRESS', 'PAUSED'].includes(managerEditingTask.status))
+      elements.managerObject.disabled = true;
+    if (managerEditingTask.status === 'IN_PROGRESS') elements.managerWorker.disabled = true;
+  }
+  elements.managerSubmitButton.disabled = submitting || !managerWorkersAvailable;
+  elements.managerSubmitButton.classList.toggle('is-loading', submitting);
+  elements.managerSubmitButton.querySelector('[data-manager-submit-text]').textContent = submitting
+    ? managerFormMode === 'edit'
+      ? 'Сохраняем изменения…'
+      : 'Создаём задачу…'
+    : managerFormMode === 'edit'
+      ? 'Сохранить изменения'
+      : 'Поставить задачу';
+}
+
+function buildManagerEditChanges(payload = null) {
+  if (!managerEditingTask) return [];
+  const current = payload ?? {
     objectId: elements.managerObject.value,
     assigneeId: elements.managerWorker.value,
     title: document.querySelector('#managerTitle').value.trim(),
@@ -1026,37 +1571,128 @@ async function submitManagerTask(event) {
     priority: new FormData(elements.managerTaskForm).get('managerPriority'),
     accessStatus: new FormData(elements.managerTaskForm).get('managerAccess'),
     position: Number(document.querySelector('#managerPosition').value),
-    steps,
+    steps: [...elements.managerSteps.children].map((step) => ({
+      ...(step.dataset.stepId ? { id: step.dataset.stepId } : {}),
+      title: step.querySelector('[data-manager-step-title]').value.trim(),
+      description: step.querySelector('[data-manager-step-description]').value.trim(),
+    })),
   };
-  const summary = `${payload.title}\nЭтапов: ${steps.length}\nФото: ${managerSelectedFiles.length}\nПозиция: ${payload.position}`;
-  if (!window.confirm(`Поставить задачу?\n\n${summary}`)) return;
-  await sendManagerTask(payload);
+  const changes = [];
+  const fields = [
+    ['title', 'Название задачи изменено'],
+    ['description', 'Описание задачи изменено'],
+    ['location', 'Место выполнения изменено'],
+    ['objectId', 'Объект изменён'],
+    ['assigneeId', 'Исполнитель изменён'],
+    ['priority', 'Приоритет изменён'],
+    ['accessStatus', 'Доступ изменён'],
+    ['position', 'Позиция задачи изменена'],
+  ];
+  for (const [field, label] of fields)
+    if ((managerEditingTask[field] ?? '') !== (current[field] ?? '')) changes.push(label);
+  const originalSteps = managerEditingTask.steps.map((step) => ({
+    id: step.id,
+    title: step.title,
+    description: step.description ?? '',
+  }));
+  const currentSteps = current.steps.map((step) => ({
+    id: step.id ?? null,
+    title: step.title,
+    description: step.description ?? '',
+  }));
+  if (JSON.stringify(originalSteps) !== JSON.stringify(currentSteps))
+    changes.push('Состав, описание или порядок этапов изменены');
+  if (managerSelectedFiles.length)
+    changes.push(`Добавлено фотографий: ${managerSelectedFiles.length}`);
+  if (managerRemovedPhotoIds.length)
+    changes.push(`Удалено исходных фотографий: ${managerRemovedPhotoIds.length}`);
+  return [...new Set(changes)];
 }
 
-async function sendManagerTask(payload) {
-  const oversizedPhoto = managerSelectedFiles.find((file) => file.size > managerPhotoMaxBytes);
-  if (oversizedPhoto) return showMessage(`Фото «${oversizedPhoto.name}» превышает лимит 8 МБ`);
-  const photosSize = managerSelectedFiles.reduce((total, file) => total + file.size, 0);
-  if (photosSize > managerPhotosMaxBytes)
-    return showMessage('Общий размер фотографий превышает лимит 96 МБ');
-  const data = new FormData();
-  data.append('payload', JSON.stringify(payload));
-  managerSelectedFiles.forEach((file) => data.append('photos', file));
-  let response = await apiFetch('/api/v1/manager/tasks', { method: 'POST', body: data });
-  let body = await readResponseBody(response);
-  if (response.status === 409 && getApiMessage(body)?.includes('уже есть задача')) {
-    if (!window.confirm(`${getApiMessage(body)}\n\nВсё равно поставить?`)) return;
-    payload.forceUrgent = true;
-    data.set('payload', JSON.stringify(payload));
-    response = await apiFetch('/api/v1/manager/tasks', { method: 'POST', body: data });
-    body = await readResponseBody(response);
+function showManagerFormError(message) {
+  elements.managerFormError.textContent = message;
+  elements.managerFormError.hidden = false;
+  elements.managerFormError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  elements.managerFormError.focus?.();
+}
+
+function clearManagerFormError(event) {
+  if (event?.target?.setCustomValidity) event.target.setCustomValidity('');
+  elements.managerFormError.textContent = '';
+  elements.managerFormError.hidden = true;
+}
+
+function showManagerConfirmation(options) {
+  managerConfirmReturnFocus = document.activeElement;
+  managerPendingConfirmation = options;
+  elements.managerConfirmTitle.textContent = options.title;
+  elements.managerConfirmText.textContent = options.text;
+  elements.managerConfirmSummary.hidden = !options.summaryRows?.length;
+  elements.managerConfirmSummary.innerHTML = options.summaryRows?.length
+    ? `<dl>${options.summaryRows
+        .map(
+          ([label, value]) =>
+            `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value || '—')}</dd></div>`,
+        )
+        .join('')}</dl>`
+    : '';
+  const backButton = elements.managerFormConfirm.querySelector('[data-manager-confirm-back]');
+  backButton.textContent = options.backLabel ?? 'Вернуться';
+  elements.managerConfirmSubmit.textContent = options.confirmLabel ?? 'Подтвердить';
+  elements.managerConfirmSubmit.classList.toggle('is-danger', Boolean(options.danger));
+  elements.managerFormConfirm.hidden = false;
+  window.requestAnimationFrame(() => elements.managerConfirmSubmit.focus());
+}
+
+function hideManagerConfirmation({ restoreFocus = true } = {}) {
+  if (elements.managerFormConfirm.hidden) return;
+  elements.managerFormConfirm.hidden = true;
+  managerPendingConfirmation = null;
+  if (restoreFocus) managerConfirmReturnFocus?.focus?.({ preventScroll: true });
+  managerConfirmReturnFocus = null;
+}
+
+async function confirmManagerAction() {
+  const pending = managerPendingConfirmation;
+  if (!pending) return;
+  hideManagerConfirmation({ restoreFocus: false });
+  if (pending.type === 'deleteStep') {
+    removeManagerStepImmediately(pending.step);
+    return;
   }
-  if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось поставить задачу');
-  closeModal();
-  currentSection = 'tasks';
-  updateBottomNavigation();
-  await loadManagerTasks();
-  showMessage('Задача поставлена');
+  if (pending.type === 'discard') {
+    finishManagerForm();
+    return;
+  }
+  if (pending.type === 'submitTask') {
+    await sendManagerTask(pending.payload);
+    return;
+  }
+  if (pending.type === 'forceUrgent') {
+    pending.payload.forceUrgent = true;
+    await sendManagerTask(pending.payload);
+  }
+}
+
+function trapManagerDialogFocus(event) {
+  const scope = elements.managerFormConfirm.hidden
+    ? modals.managerTask
+    : elements.managerFormConfirm;
+  const focusable = [
+    ...scope.querySelectorAll('button, input, select, textarea, [tabindex]'),
+  ].filter(
+    (element) => !element.disabled && !element.hidden && element.getAttribute('tabindex') !== '-1',
+  );
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 async function updateManagerTask(field, value) {
@@ -1307,7 +1943,9 @@ function cleanStepTitle(title) {
 function renderManagerControls() {
   if (!isManager()) return;
   elements.taskHelpIsland.hidden = false;
-  elements.taskHelpIsland.innerHTML = `<h3>Управление задачей</h3><div class="managerControls"><label>Приоритет<select data-manager-update="priority"><option value="NORMAL" ${selectedTask.priority === 'NORMAL' ? 'selected' : ''}>Обычная</option><option value="URGENT" ${selectedTask.priority === 'URGENT' ? 'selected' : ''}>Срочная</option></select></label><label>Доступ<select data-manager-update="accessStatus"><option value="OPEN" ${selectedTask.accessStatus === 'OPEN' ? 'selected' : ''}>Открытая</option><option value="CLOSED" ${selectedTask.accessStatus === 'CLOSED' ? 'selected' : ''}>Закрытая</option></select></label><button type="button" class="dangerButton" data-manager-delete>Удалить задачу</button></div>`;
+  const editable =
+    !['COMPLETED', 'CANCELLED'].includes(selectedTask.status) && !selectedTask.deletedAt;
+  elements.taskHelpIsland.innerHTML = `<h3>Управление задачей</h3><div class="managerControls"><span class="managerControlValue"><small>Приоритет</small><strong>${selectedTask.priority === 'URGENT' ? 'Срочная' : 'Обычная'}</strong></span><span class="managerControlValue"><small>Доступ</small><strong>${selectedTask.accessStatus === 'CLOSED' ? 'Закрытая' : 'Открытая'}</strong></span>${editable ? '<button type="button" class="secondaryButton" data-manager-edit>Редактировать задачу</button>' : '<p class="managerEditUnavailable">Завершённую задачу нельзя редактировать.</p>'}<button type="button" class="dangerButton" data-manager-delete>Удалить задачу</button></div>`;
 }
 
 async function hydrateDetailPhotos() {
@@ -1452,7 +2090,7 @@ async function loadWorkerMessages() {
       ? messages
           .map(
             (message) =>
-              `<article class="whiteCard messageCard"><strong>${message.kind === 'MANAGER_REPLY' ? 'Ответ руководителя' : message.kind === 'HELP_REQUEST' ? 'Запрос помощи' : 'Пауза'}</strong><p>${escapeHtml(message.body)}</p><small>${escapeHtml(message.task.title)}</small></article>`,
+              `<article class="whiteCard messageCard ${message.readAt ? '' : 'is-unread'}"><strong>${message.kind === 'TASK_UPDATED' ? 'Задача изменена' : message.kind === 'MANAGER_REPLY' ? 'Ответ руководителя' : message.kind === 'HELP_REQUEST' ? 'Запрос помощи' : 'Пауза'}</strong><p>${escapeHtml(message.body).replaceAll('\n', '<br>')}</p><small>${escapeHtml(message.task.title)}</small></article>`,
           )
           .join('')
       : '<div class="emptyObject"><p>Сообщений пока нет</p></div>';
@@ -1465,6 +2103,16 @@ async function loadWorkerMessages() {
           )
           .join('')
       : '<div class="emptyObject"><p>Архив пока пуст</p></div>';
+  if (messagesResponse.ok)
+    await Promise.all(
+      messages
+        .filter((message) => message.kind === 'TASK_UPDATED' && !message.readAt)
+        .map((message) =>
+          apiFetch(`/api/v1/worker/messages/${message.id}/read`, { method: 'PATCH' }).catch(
+            () => null,
+          ),
+        ),
+    );
 }
 
 async function loadManagerMessages() {
@@ -1578,7 +2226,7 @@ function renderHistoryEvent(event) {
     hour: '2-digit',
     minute: '2-digit',
   });
-  return `<article class="taskCard historyEventCard"><h3>${eventLabel(event.type)}</h3><p class="taskSummary">${escapeHtml(description)}</p>${photos}<time datetime="${event.createdAt}">${time}</time>${metadata.objectName ? `<p>${escapeHtml(metadata.objectName)}</p>` : ''}${metadata.taskTitle ? `<p>«${escapeHtml(metadata.taskTitle)}»</p>` : ''}${metadata.stepTitle ? `<p>Этап: ${escapeHtml(metadata.stepTitle)}</p>` : ''}</article>`;
+  return `<article class="taskCard historyEventCard"><h3>${eventLabel(event.type)}</h3><p class="taskSummary">${escapeHtml(description)}</p>${metadata.summary ? `<p>${escapeHtml(metadata.summary)}</p>` : ''}${metadata.reason ? `<p><strong>Причина:</strong> ${escapeHtml(metadata.reason)}</p>` : ''}${photos}<time datetime="${event.createdAt}">${time}</time>${metadata.actorName ? `<p>Изменил: ${escapeHtml(metadata.actorName)}</p>` : ''}${metadata.objectName ? `<p>${escapeHtml(metadata.objectName)}</p>` : ''}${metadata.taskTitle ? `<p>«${escapeHtml(metadata.taskTitle)}»</p>` : ''}${metadata.stepTitle ? `<p>Этап: ${escapeHtml(metadata.stepTitle)}</p>` : ''}</article>`;
 }
 
 function historyDateLabel(value, fallback) {
@@ -1605,6 +2253,7 @@ function eventLabel(type) {
       TASK_PAUSED: 'Поставил задачу на паузу',
       HELP_REQUEST: 'Запросил помощь',
       MANAGER_REPLY: 'Получил ответ руководителя',
+      TASK_UPDATED: 'Изменил задачу',
     }[type] ?? 'Выполнил действие'
   );
 }

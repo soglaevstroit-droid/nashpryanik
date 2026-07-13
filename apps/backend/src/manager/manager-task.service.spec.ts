@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ManagerTaskService } from './manager-task.service.js';
 import { managerTaskUploadLimits } from './manager-task.controller.js';
 
@@ -101,4 +101,184 @@ test('rejects task creation without a positive integer position before database 
     }),
     BadRequestException,
   );
+});
+
+function editableTask(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'task-1',
+    title: 'Старое название',
+    description: 'Старое описание',
+    location: 'Этаж 1',
+    status: 'ASSIGNED',
+    priority: 'NORMAL',
+    accessStatus: 'OPEN',
+    position: 1,
+    creatorId: manager.id,
+    assigneeId: 'worker-1',
+    processId: 'process-1',
+    objectId: 'object-1',
+    completedAt: null,
+    deletedAt: null,
+    updatedAt: new Date('2026-07-13T12:00:00.000Z'),
+    object: { id: 'object-1', name: 'Пряник' },
+    steps: [
+      {
+        id: 'step-1',
+        taskId: 'task-1',
+        title: 'Подготовка',
+        description: 'Подготовить место',
+        status: 'CREATED',
+        order: 1,
+        completedAt: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function editInput(overrides: Record<string, unknown> = {}) {
+  return {
+    operationId: 'edit-operation-1',
+    updatedAt: '2026-07-13T12:00:00.000Z',
+    objectId: 'object-1',
+    assigneeId: 'worker-1',
+    title: 'Новое название',
+    description: 'Старое описание',
+    location: 'Этаж 1',
+    priority: 'NORMAL' as const,
+    accessStatus: 'OPEN' as const,
+    position: 1,
+    steps: [{ id: 'step-1', title: 'Подготовка', description: 'Подготовить место' }],
+    ...overrides,
+  };
+}
+
+test('full edit stores a structured before/after event and worker notification atomically', async () => {
+  const task = editableTask();
+  let eventInput: Record<string, unknown> | undefined;
+  let notification: Record<string, unknown> | undefined;
+  let updatedTitle = task.title;
+  const client = {
+    task: {
+      findFirst: async () => task,
+      update: async ({ data }: { data: { title: string } }) => ((updatedTitle = data.title), task),
+    },
+    user: {
+      findFirst: async () => ({ id: 'worker-1', name: 'Илья Н.', email: 'ilya' }),
+      findUnique: async () => ({ name: 'Иван Р.', email: 'manager' }),
+    },
+    constructionObject: { findFirst: async () => ({ id: 'object-1', name: 'Пряник' }) },
+    process: { update: async () => ({}) },
+    taskStep: { update: async () => ({}), create: async () => ({}) },
+    taskMessage: {
+      create: async ({ data }: { data: Record<string, unknown> }) => ((notification = data), data),
+    },
+  };
+  const database = {
+    event: { findUnique: async () => null },
+    $transaction: async (action: (value: typeof client) => unknown) => action(client),
+    task: {
+      findFirst: async () => ({ ...task, title: updatedTitle, messages: [] }),
+    },
+    user: { findMany: async () => [{ id: 'worker-1', name: 'Илья Н.', email: 'ilya' }] },
+    artifact: { findMany: async () => [] },
+  };
+  const events = {
+    createEvent: async (input: Record<string, unknown>) => ((eventInput = input), input),
+  };
+  const service = new ManagerTaskService(database as never, events as never, {} as never);
+  const result = await service.editTask(manager, 'task-1', editInput());
+  assert.equal((result as unknown as { title: string }).title, 'Новое название');
+  assert.equal(eventInput?.type, 'TASK_UPDATED');
+  assert.match(JSON.stringify(eventInput?.payload), /"before":"Старое название"/);
+  assert.match(JSON.stringify(eventInput?.payload), /"after":"Новое название"/);
+  assert.equal(notification?.kind, 'TASK_UPDATED');
+  assert.equal(notification?.recipientId, 'worker-1');
+});
+
+test('full edit rejects stale updatedAt with HTTP conflict semantics', async () => {
+  const task = editableTask();
+  const database = {
+    event: { findUnique: async () => null },
+    $transaction: async (action: (client: unknown) => unknown) =>
+      action({ task: { findFirst: async () => task } }),
+  };
+  const service = new ManagerTaskService(database as never, {} as never, {} as never);
+  await assert.rejects(
+    service.editTask(manager, 'task-1', editInput({ updatedAt: '2026-07-13T11:59:59.000Z' })),
+    ConflictException,
+  );
+});
+
+test('active task edit requires a reason before any mutation', async () => {
+  const task = editableTask({ status: 'IN_PROGRESS' });
+  const database = {
+    event: { findUnique: async () => null },
+    $transaction: async (action: (client: unknown) => unknown) =>
+      action({ task: { findFirst: async () => task } }),
+  };
+  const service = new ManagerTaskService(database as never, {} as never, {} as never);
+  await assert.rejects(service.editTask(manager, 'task-1', editInput()), BadRequestException);
+});
+
+test('completed task is read-only in the manager edit API', async () => {
+  const task = editableTask({ status: 'COMPLETED' });
+  const database = {
+    event: { findUnique: async () => null },
+    $transaction: async (action: (client: unknown) => unknown) =>
+      action({ task: { findFirst: async () => task } }),
+  };
+  const service = new ManagerTaskService(database as never, {} as never, {} as never);
+  await assert.rejects(service.editTask(manager, 'task-1', editInput()), BadRequestException);
+});
+
+test('completed step cannot be changed, reordered or deleted', async () => {
+  const task = editableTask({
+    steps: [
+      {
+        id: 'step-completed',
+        taskId: 'task-1',
+        title: 'Выполнено',
+        description: 'Готово',
+        status: 'COMPLETED',
+        order: 1,
+        completedAt: new Date(),
+      },
+    ],
+  });
+  const client = {
+    task: { findFirst: async () => task },
+    user: { findFirst: async () => ({ id: 'worker-1' }) },
+    constructionObject: { findFirst: async () => ({ id: 'object-1' }) },
+  };
+  const database = {
+    event: { findUnique: async () => null },
+    $transaction: async (action: (value: typeof client) => unknown) => action(client),
+  };
+  const service = new ManagerTaskService(database as never, {} as never, {} as never);
+  await assert.rejects(
+    service.editTask(
+      manager,
+      'task-1',
+      editInput({
+        steps: [{ id: 'step-completed', title: 'Изменённое выполненное', description: 'Готово' }],
+      }),
+    ),
+    BadRequestException,
+  );
+});
+
+test('repeated edit operation returns current task without a second transaction', async () => {
+  let transactions = 0;
+  const task = editableTask({ messages: [] });
+  const database = {
+    event: { findUnique: async () => ({ id: 'existing-edit-event' }) },
+    $transaction: async () => ((transactions += 1), null),
+    task: { findFirst: async () => task },
+    user: { findMany: async () => [{ id: 'worker-1' }] },
+    artifact: { findMany: async () => [] },
+  };
+  const service = new ManagerTaskService(database as never, {} as never, {} as never);
+  await service.editTask(manager, 'task-1', editInput());
+  assert.equal(transactions, 0);
 });

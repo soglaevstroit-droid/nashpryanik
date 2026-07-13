@@ -100,12 +100,19 @@ export class TaskStepService {
         where: { id },
         include: {
           task: {
-            include: { object: true, steps: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
+            include: {
+              object: true,
+              steps: {
+                where: { deletedAt: null },
+                orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+              },
+            },
           },
         },
       });
       if (
         !current ||
+        current.deletedAt ||
         current.task.deletedAt ||
         (user.role === 'WORKER' && current.task.assigneeId !== user.id)
       )
@@ -228,7 +235,7 @@ export class TaskStepService {
     if (user.role === 'WORKER' && this.database) {
       const task = await this.database.task.findUnique({
         where: { id: step.taskId },
-        include: { steps: { orderBy: { order: 'asc' } } },
+        include: { steps: { where: { deletedAt: null }, orderBy: { order: 'asc' } } },
       });
       if (!task || task.deletedAt || task.assigneeId !== user.id)
         throw new NotFoundException('Task step not found');

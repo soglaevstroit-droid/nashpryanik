@@ -62,7 +62,14 @@ export class TaskMessageService {
       throw new BadRequestException('Manager decision is invalid');
     const request = await this.database.taskMessage.findUnique({
       where: { id: messageId },
-      include: { task: { include: { object: true, steps: { orderBy: { order: 'asc' } } } } },
+      include: {
+        task: {
+          include: {
+            object: true,
+            steps: { where: { deletedAt: null }, orderBy: { order: 'asc' } },
+          },
+        },
+      },
     });
     if (!request || request.kind === 'MANAGER_REPLY')
       throw new NotFoundException('Message not found');
@@ -129,10 +136,40 @@ export class TaskMessageService {
 
   workerMessages(user: AuthUser) {
     return this.database.taskMessage.findMany({
-      where: { task: { assigneeId: user.id } },
+      where: {
+        OR: [{ recipientId: user.id }, { recipientId: null, task: { assigneeId: user.id } }],
+      },
       include: { task: { include: { object: true } } },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async markRead(user: AuthUser, messageId: string) {
+    const message = await this.database.taskMessage.findFirst({
+      where: {
+        id: messageId,
+        OR: [{ recipientId: user.id }, { recipientId: null, task: { assigneeId: user.id } }],
+      },
+    });
+    if (!message) throw new NotFoundException('Message not found');
+    if (message.readAt) return message;
+    const readAt = new Date();
+    const updated = await this.database.taskMessage.update({
+      where: { id: message.id },
+      data: { readAt },
+    });
+    await this.events.createEvent({
+      type: 'NOTIFICATION_READ',
+      actorId: user.id,
+      entityType: 'taskMessage',
+      entityId: message.id,
+      taskId: message.taskId,
+      taskStepId: message.taskStepId,
+      idempotencyKey: `task-message:read:${message.id}`,
+      payload: { action: 'NOTIFICATION_READ', messageId: message.id },
+      metadata: {},
+    });
+    return updated;
   }
 
   managerMessages() {
@@ -148,7 +185,7 @@ export class TaskMessageService {
       where: { status: 'COMPLETED', ...(manager ? {} : { assigneeId: user.id }) },
       include: {
         object: true,
-        steps: { orderBy: { order: 'asc' } },
+        steps: { where: { deletedAt: null }, orderBy: { order: 'asc' } },
         messages: { orderBy: { createdAt: 'asc' } },
       },
       orderBy: { completedAt: 'desc' },
@@ -178,7 +215,10 @@ export class TaskMessageService {
     return this.database.task
       .findFirst({
         where: { id: taskId, assigneeId: user.id, deletedAt: null },
-        include: { object: true, steps: { orderBy: { order: 'asc' } } },
+        include: {
+          object: true,
+          steps: { where: { deletedAt: null }, orderBy: { order: 'asc' } },
+        },
       })
       .then((task) => task ?? Promise.reject(new NotFoundException('Task not found')));
   }

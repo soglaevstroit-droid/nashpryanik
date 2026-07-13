@@ -19,9 +19,20 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     this.logger.error('Unhandled backend exception', exception);
 
+    const exceptionResponse = exception instanceof HttpException ? exception.getResponse() : null;
+    const message =
+      typeof exceptionResponse === 'string'
+        ? exceptionResponse
+        : exceptionResponse &&
+            typeof exceptionResponse === 'object' &&
+            'message' in exceptionResponse
+          ? (exceptionResponse as { message?: unknown }).message
+          : undefined;
+
     response.status(statusCode).json({
       statusCode,
       error: exception instanceof HttpException ? exception.name : 'InternalServerError',
+      ...(typeof message === 'string' || Array.isArray(message) ? { message } : {}),
       timestamp: new Date().toISOString(),
     });
   }

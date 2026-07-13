@@ -132,6 +132,7 @@ enum TaskMessageKind {
   PAUSE_REQUEST
   HELP_REQUEST
   MANAGER_REPLY
+  TASK_UPDATED
 }
 
 enum ManagerDecision {
@@ -334,19 +335,22 @@ model Task {
 }
 
 model TaskMessage {
-  id         String           @id @default(uuid())
-  taskId     String
-  taskStepId String?
-  senderId   String
-  parentId   String?
-  kind       TaskMessageKind
-  body       String
-  decision   ManagerDecision?
-  createdAt  DateTime         @default(now())
-  task       Task             @relation(fields: [taskId], references: [id], onDelete: Restrict)
+  id          String           @id @default(uuid())
+  taskId      String
+  taskStepId  String?
+  senderId    String
+  recipientId String?
+  parentId    String?
+  kind        TaskMessageKind
+  body        String
+  decision    ManagerDecision?
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+  task        Task             @relation(fields: [taskId], references: [id], onDelete: Restrict)
 
   @@index([taskId, createdAt])
   @@index([senderId, createdAt])
+  @@index([recipientId, createdAt])
   @@index([parentId])
   @@map("task_messages")
 }
@@ -363,11 +367,15 @@ model TaskStep {
   completedByUserId     String?
   minimumPhotoCount     Int            @default(2)
   completionOperationId String?        @unique
+  deletedAt             DateTime?
+  deletedByUserId       String?
+  deletionReason        String?
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
   task                  Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
+  @@index([taskId, deletedAt, order])
   @@index([status])
   @@index([order])
   @@index([createdAt])
