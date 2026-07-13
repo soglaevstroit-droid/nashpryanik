@@ -34,9 +34,14 @@ enum EventType {
   TASK_ASSIGNED
   TASK_ACCEPTED
   TASK_STARTED
+  TASK_PAUSED
   TASK_SENT_TO_REVIEW
   TASK_COMPLETED
   TASK_CANCELLED
+  TASK_PRIORITY_CHANGED
+  TASK_ACCESS_OPENED
+  TASK_ACCESS_CLOSED
+  TASK_DELETED
   STEP_CREATED
   STEP_STARTED
   STEP_COMPLETED
@@ -44,6 +49,8 @@ enum EventType {
   STEP_CANCELLED
   PHOTO_CAPTURED
   PHOTO_UPLOADED
+  HELP_REQUEST
+  MANAGER_REPLY
   PHOTO_APPROVED
   PHOTO_REJECTED
   PHOTO_DELETED
@@ -115,9 +122,21 @@ enum TaskStatus {
   ASSIGNED
   ACCEPTED
   IN_PROGRESS
+  PAUSED
   ON_REVIEW
   COMPLETED
   CANCELLED
+}
+
+enum TaskMessageKind {
+  PAUSE_REQUEST
+  HELP_REQUEST
+  MANAGER_REPLY
+}
+
+enum ManagerDecision {
+  CONTINUE
+  STOP
 }
 
 enum TaskPriority {
@@ -125,6 +144,12 @@ enum TaskPriority {
   NORMAL
   HIGH
   CRITICAL
+  URGENT
+}
+
+enum TaskAccessStatus {
+  OPEN
+  CLOSED
 }
 
 enum TaskStepStatus {
@@ -270,45 +295,77 @@ model ShiftAccrual {
 }
 
 model Task {
-  id          String              @id @default(uuid())
-  title       String
-  description String?
-  location    String?
-  status      TaskStatus          @default(CREATED)
-  priority    TaskPriority        @default(NORMAL)
-  creatorId   String
-  assigneeId  String?
-  processId   String
-  objectId    String?
-  completedAt DateTime?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  object      ConstructionObject? @relation(fields: [objectId], references: [id], onDelete: Restrict)
-  steps       TaskStep[]
+  id                  String              @id @default(uuid())
+  title               String
+  description         String?
+  location            String?
+  status              TaskStatus          @default(CREATED)
+  priority            TaskPriority        @default(NORMAL)
+  accessStatus        TaskAccessStatus    @default(OPEN)
+  position            Int                 @default(1)
+  creatorId           String
+  assigneeId          String?
+  processId           String
+  objectId            String?
+  completedAt         DateTime?
+  deletedAt           DateTime?
+  deletedByUserId     String?
+  deletionReason      String?
+  creationOperationId String?             @unique
+  isWorkBlocked       Boolean             @default(false)
+  workBlockedAt       DateTime?
+  workBlockedByUserId String?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  object              ConstructionObject? @relation(fields: [objectId], references: [id], onDelete: Restrict)
+  steps               TaskStep[]
+  messages            TaskMessage[]
 
   @@index([status])
   @@index([priority])
   @@index([creatorId])
   @@index([assigneeId])
   @@index([assigneeId, status])
+  @@index([assigneeId, deletedAt, position])
   @@index([objectId])
   @@index([processId])
   @@index([createdAt])
   @@map("tasks")
 }
 
+model TaskMessage {
+  id         String           @id @default(uuid())
+  taskId     String
+  taskStepId String?
+  senderId   String
+  parentId   String?
+  kind       TaskMessageKind
+  body       String
+  decision   ManagerDecision?
+  createdAt  DateTime         @default(now())
+  task       Task             @relation(fields: [taskId], references: [id], onDelete: Restrict)
+
+  @@index([taskId, createdAt])
+  @@index([senderId, createdAt])
+  @@index([parentId])
+  @@map("task_messages")
+}
+
 model TaskStep {
-  id          String         @id @default(uuid())
-  taskId      String
-  title       String
-  description String?
-  status      TaskStepStatus @default(CREATED)
-  order       Int
-  startedAt   DateTime?
-  completedAt DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  task        Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id                    String         @id @default(uuid())
+  taskId                String
+  title                 String
+  description           String?
+  status                TaskStepStatus @default(CREATED)
+  order                 Int
+  startedAt             DateTime?
+  completedAt           DateTime?
+  completedByUserId     String?
+  minimumPhotoCount     Int            @default(2)
+  completionOperationId String?        @unique
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  task                  Task           @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
   @@index([status])

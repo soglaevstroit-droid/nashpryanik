@@ -46,11 +46,18 @@ let shiftStateResolved = false;
 let lastTaskLockedMessageAt = 0;
 let coinTicker = null;
 let historyCursor = null;
+let managerHistoryWorker = null;
 let selectedTaskId = null;
 let selectedTask = null;
 let taskListScrollY = 0;
 let taskDetailActionPending = false;
 let pendingCameraMode = null;
+let currentSection = 'tasks';
+let previousWorkingSection = 'tasks';
+let managerSelectedFiles = [];
+let managerStepCount = 0;
+let pendingStepCompletionId = null;
+let taskCompletionOperationId = null;
 let cameraAttempt = {
   mode: null,
   operationId: null,
@@ -60,6 +67,7 @@ let cameraAttempt = {
   isSubmitting: false,
   facingMode: 'environment',
   cameraCount: 0,
+  taskStepId: null,
 };
 
 const taskStatusView = {
@@ -196,10 +204,28 @@ const elements = {
   ],
   workerObjectsList: document.querySelector('#workerObjectsList'),
   historyList: document.querySelector('#historyList'),
+  historyHeading: document.querySelector('#historyHeading'),
   historyMoreButton: document.querySelector('#historyMoreButton'),
   taskDescription: document.querySelector('#taskDescription'),
   taskAssignee: document.querySelector('#taskAssignee'),
   taskPhotos: document.querySelector('#taskPhotos'),
+  taskPauseInfo: document.querySelector('#taskPauseInfo'),
+  workerMessagesList: document.querySelector('#workerMessagesList'),
+  workerArchiveList: document.querySelector('#workerArchiveList'),
+  taskListHeading: document.querySelector('#taskListHeading'),
+  orderNavButton: document.querySelector('#orderNavButton'),
+  orderNavLabel: document.querySelector('#orderNavLabel'),
+  historyNavButton: document.querySelector('#historyNavButton'),
+  taskHelpIsland: document.querySelector('#taskHelpIsland'),
+  managerTaskForm: document.querySelector('#managerTaskForm'),
+  managerObject: document.querySelector('#managerObject'),
+  managerWorker: document.querySelector('#managerWorker'),
+  managerSteps: document.querySelector('#managerSteps'),
+  managerPhotos: document.querySelector('#managerPhotos'),
+  managerPhotoPreview: document.querySelector('#managerPhotoPreview'),
+  taskDetailProgressLine: document.querySelector('#taskDetailProgressLine'),
+  taskDetailProgressPercent: document.querySelector('#taskDetailProgressPercent'),
+  taskDetailProgressCount: document.querySelector('#taskDetailProgressCount'),
 };
 
 const photoSlider = new PhotoSlider({
@@ -224,6 +250,8 @@ const views = {
   resultConfirmation: document.querySelector('#resultConfirmationView'),
   workSent: document.querySelector('#workSentView'),
   history: document.querySelector('#historyView'),
+  messages: document.querySelector('#messagesView'),
+  maintenance: document.querySelector('#maintenanceView'),
 };
 
 const modals = {
@@ -232,6 +260,10 @@ const modals = {
   shiftCamera: document.querySelector('#shiftCameraModal'),
   taskStatusConfirm: document.querySelector('#taskStatusConfirmModal'),
   helpRequest: document.querySelector('#helpRequestModal'),
+  managerTask: document.querySelector('#managerTaskModal'),
+  completeStep: document.querySelector('#completeStepModal'),
+  completeTask: document.querySelector('#completeTaskModal'),
+  taskCompleted: document.querySelector('#taskCompletedModal'),
 };
 
 let modalCloseTimer;
@@ -241,8 +273,19 @@ elements.loginForm.addEventListener('submit', async (event) => {
   await login();
 });
 elements.historyMoreButton.addEventListener('click', () => loadHistory(false));
+elements.managerTaskForm.addEventListener('submit', submitManagerTask);
+elements.managerPhotos.addEventListener('change', () => {
+  managerSelectedFiles = Array.from(elements.managerPhotos.files ?? []);
+  renderManagerPhotoPreview();
+});
+document.addEventListener('change', (event) => {
+  const control = event.target.closest?.('[data-manager-update]');
+  if (control) void updateManagerTask(control.dataset.managerUpdate, control.value);
+});
 
 document.addEventListener('click', async (event) => {
+  const sectionButton = event.target.closest('[data-section]');
+  const maintenanceBackButton = event.target.closest('[data-maintenance-back]');
   const viewButton = event.target.closest('[data-open-view]');
   const modalButton = event.target.closest('[data-open-modal]');
   const closeButton = event.target.closest('[data-close-modal]');
@@ -271,6 +314,73 @@ document.addEventListener('click', async (event) => {
   const detailStepAction = event.target.closest('[data-detail-step-action]');
   const uploadPhotoButton = event.target.closest('[data-upload-detail-photo]');
   const reloadTaskDetailButton = event.target.closest('[data-reload-task-detail]');
+  const addManagerStepButton = event.target.closest('[data-add-manager-step]');
+  const removeManagerStepButton = event.target.closest('[data-remove-manager-step]');
+  const removeManagerPhotoButton = event.target.closest('[data-remove-manager-photo]');
+  const closeManagerFormButton = event.target.closest('[data-close-manager-form]');
+  const managerDeleteButton = event.target.closest('[data-manager-delete]');
+  const chooseAnotherTaskButton = event.target.closest('[data-choose-another-task]');
+  const goToHistoryButton = event.target.closest('[data-go-to-history]');
+  const confirmCompleteStepButton = event.target.closest('[data-confirm-complete-step]');
+  const cancelCompleteStepButton = event.target.closest('[data-cancel-complete-step]');
+  const confirmCompleteTaskButton = event.target.closest('[data-confirm-complete-task]');
+  const cancelCompleteTaskButton = event.target.closest('[data-cancel-complete-task]');
+  const finishCompleteTaskButton = event.target.closest('[data-finish-complete-task]');
+  if (sectionButton) {
+    navigateSection(sectionButton.dataset.section);
+    return;
+  }
+  if (maintenanceBackButton) {
+    navigateSection(previousWorkingSection || 'tasks');
+    return;
+  }
+  if (addManagerStepButton) return addManagerStep();
+  if (removeManagerStepButton)
+    return removeManagerStep(removeManagerStepButton.closest('.managerStepFields'));
+  if (removeManagerPhotoButton) {
+    managerSelectedFiles.splice(Number(removeManagerPhotoButton.dataset.removeManagerPhoto), 1);
+    renderManagerPhotoPreview();
+    return;
+  }
+  if (closeManagerFormButton) return closeManagerForm();
+  if (managerDeleteButton) return deleteManagerTask();
+  if (chooseAnotherTaskButton) {
+    selectedTask = null;
+    selectedTaskId = null;
+    openView('myWork');
+    return;
+  }
+  if (goToHistoryButton) return navigateSection('history');
+  if (confirmCompleteStepButton) {
+    const stepId = pendingStepCompletionId;
+    pendingStepCompletionId = null;
+    closeModal();
+    if (stepId) await runDetailAction('step', 'complete', stepId);
+    return;
+  }
+  if (cancelCompleteStepButton) {
+    pendingStepCompletionId = null;
+    closeModal();
+    return;
+  }
+  if (confirmCompleteTaskButton) return completeSelectedTask();
+  if (cancelCompleteTaskButton) return closeModal();
+  if (finishCompleteTaskButton) {
+    closeModal();
+    selectedTask = null;
+    selectedTaskId = null;
+    await loadWorkerObjects();
+    openView('myWork');
+    return;
+  }
+  const managerReplyButton = event.target.closest('[data-manager-reply]');
+  if (managerReplyButton) {
+    await replyToWorkerMessage(
+      managerReplyButton.dataset.messageId,
+      managerReplyButton.dataset.managerReply,
+    );
+    return;
+  }
   if (reloadTaskDetailButton) {
     renderTaskDetailLoading();
     await reloadTaskDetails();
@@ -289,11 +399,7 @@ document.addEventListener('click', async (event) => {
   }
 
   if (detailStepAction) {
-    await runDetailAction(
-      'step',
-      detailStepAction.dataset.detailStepAction,
-      detailStepAction.dataset.stepId,
-    );
+    requestStepCompletion(detailStepAction.dataset.stepId);
     return;
   }
 
@@ -312,7 +418,8 @@ document.addEventListener('click', async (event) => {
   }
 
   if (taskCard && !event.target.closest('[data-photo-slider]')) {
-    if (isTaskAccessLocked()) return notifyTaskLocked();
+    if (!isManager() && (isTaskAccessLocked() || taskCard.dataset.businessLocked === 'true'))
+      return notifyTaskLocked();
     await openTaskDetails(taskCard.dataset.workerTaskId);
     return;
   }
@@ -407,7 +514,7 @@ document.addEventListener('click', async (event) => {
   }
 
   if (sendHelpRequestButton) {
-    sendHelpRequest();
+    await sendHelpRequest();
   }
 });
 
@@ -482,6 +589,18 @@ async function showWorkspace() {
     return false;
   }
 
+  if (isManager()) {
+    configureBottomNavigation();
+    elements.userInfo.textContent = currentUser.name ?? 'Руководитель';
+    elements.loginScreen.hidden = true;
+    elements.loginScreen.classList.remove('is-active');
+    elements.workspaceScreen.hidden = false;
+    elements.taskListHeading.textContent = 'Задачи сотрудников';
+    await loadManagerTasks();
+    navigateSection('tasks');
+    return true;
+  }
+
   const isSynced = await refreshShiftState();
 
   if (!isSynced) {
@@ -489,12 +608,13 @@ async function showWorkspace() {
   }
 
   elements.userInfo.textContent = currentUser?.name ?? 'Илья Н.';
+  configureBottomNavigation();
   elements.loginScreen.hidden = true;
   elements.loginScreen.classList.remove('is-active');
   elements.workspaceScreen.hidden = false;
   renderTask();
   await loadWorkerObjects();
-  openView('myWork');
+  navigateSection('tasks');
   return true;
 }
 
@@ -515,6 +635,7 @@ function openView(name, options = {}) {
     renderStagePhoto();
   }
   if (name === 'history') void loadHistory(true);
+  if (name === 'messages') void loadWorkerMessages();
 
   for (const [viewName, view] of Object.entries(views)) {
     view.classList.toggle('is-active', viewName === name);
@@ -524,6 +645,78 @@ function openView(name, options = {}) {
   resetCarousels(views[name]);
   closeModal();
   if (!options.preserveScroll) window.scrollTo({ top: 0, behavior: 'instant' });
+}
+
+function navigateSection(section) {
+  if (section === 'order' && isManager()) {
+    currentSection = 'order';
+    updateBottomNavigation();
+    void openManagerTaskForm();
+    return;
+  }
+  if (section === 'history' && !isManager()) {
+    if (['tasks', 'history'].includes(currentSection))
+      previousWorkingSection = currentSection === 'history' ? 'tasks' : currentSection;
+    currentSection = 'history';
+    openView('maintenance');
+    updateBottomNavigation();
+    return;
+  }
+  if (['messages', 'order', 'profile'].includes(section)) {
+    if (['tasks', 'history'].includes(currentSection)) previousWorkingSection = currentSection;
+    currentSection = section;
+    openView('maintenance');
+  } else if (section === 'history') {
+    currentSection = 'history';
+    previousWorkingSection = 'history';
+    openView('history');
+  } else {
+    currentSection = 'tasks';
+    previousWorkingSection = 'tasks';
+    openView('myWork', { preserveScroll: true });
+  }
+  updateBottomNavigation();
+}
+
+function isManager() {
+  return ['FOREMAN', 'DIRECTOR', 'CREATOR'].includes(currentUser?.role);
+}
+
+function configureBottomNavigation() {
+  const manager = isManager();
+  const expectedSections = ['tasks', 'messages', 'order', 'history', 'profile'];
+  const buttons = Array.from(document.querySelectorAll('.bottomNav [data-section]'));
+
+  for (const [index, button] of buttons.entries()) {
+    button.hidden = !expectedSections.includes(button.dataset.section);
+    button.style.order = String(expectedSections.indexOf(button.dataset.section));
+    button.dataset.menuRole = currentUser?.role ?? '';
+    if (button.dataset.section === 'history') {
+      button.setAttribute(
+        'aria-label',
+        manager ? 'Открыть историю сотрудников' : 'История — технические работы',
+      );
+    }
+    if (index >= expectedSections.length) button.hidden = true;
+  }
+
+  elements.workspaceScreen.classList.toggle('manager-mode', manager);
+  elements.orderNavLabel.textContent = manager ? 'Поставить' : 'Заказать';
+  elements.orderNavButton.setAttribute('aria-label', manager ? 'Поставить задачу' : 'Заказать');
+  elements.historyNavButton.hidden = false;
+  managerHistoryWorker = null;
+  historyCursor = null;
+  elements.historyHeading.textContent = 'История';
+}
+
+function updateBottomNavigation() {
+  for (const button of document.querySelectorAll('.bottomNav [data-section]')) {
+    const active = button.dataset.section === currentSection;
+    button.classList.toggle('is-active', active);
+    button.classList.toggle('is-order-active', active && currentSection === 'order');
+    if (active) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  }
 }
 
 function openModal(name) {
@@ -589,18 +782,19 @@ function notifyTaskLocked() {
 
 function applyTaskAccessState() {
   const locked = isTaskAccessLocked();
-  photoSlider.setLocked(elements.workerObjectsList, locked);
   for (const card of elements.workerObjectsList.querySelectorAll('[data-worker-task-id]')) {
-    card.classList.toggle('is-task-locked', locked);
-    card.setAttribute('aria-disabled', String(locked));
+    const cardLocked = locked || card.dataset.businessLocked === 'true';
+    photoSlider.setLocked(card, cardLocked);
+    card.classList.toggle('is-task-locked', cardLocked);
+    card.setAttribute('aria-disabled', String(cardLocked));
     card.setAttribute(
       'aria-label',
-      locked
+      cardLocked
         ? `${card.querySelector('h3')?.textContent ?? 'Задача'}. Задача заблокирована до открытия смены`
         : (card.querySelector('h3')?.textContent ?? 'Открыть задачу'),
     );
-    card.setAttribute('role', locked ? 'group' : 'button');
-    card.tabIndex = locked ? -1 : 0;
+    card.setAttribute('role', cardLocked ? 'group' : 'button');
+    card.tabIndex = cardLocked ? -1 : 0;
   }
   if (locked) {
     photoSlider.close();
@@ -622,7 +816,7 @@ function renderShiftState() {
   const pending = workerSummary?.coins?.pendingCoinUnits ?? 0;
   elements.approvedCoinAmount.textContent = '0,00';
   elements.approvedCoinAmount.classList.toggle('is-live', isOpen);
-  elements.pendingCoinAmount.textContent = formatCoinUnits(pending);
+  elements.pendingCoinAmount.textContent = formatRoundedCoinUnits(pending);
   elements.totalCoinBalance.textContent = formatApprovedCoinUnits(approved);
   if (isOpen) startCoinTicker();
   else stopCoinTicker();
@@ -730,16 +924,193 @@ async function loadWorkerObjects() {
   }
 }
 
+async function loadManagerTasks() {
+  elements.workerObjectsList.innerHTML = '<p>Загружаем задачи…</p>';
+  const response = await apiFetch('/api/v1/manager/tasks');
+  const tasks = await readResponseBody(response);
+  if (!response.ok) {
+    elements.workerObjectsList.innerHTML =
+      '<div class="emptyObject"><p>Не удалось загрузить задачи</p></div>';
+    return;
+  }
+  elements.workerObjectsList.innerHTML = tasks.length
+    ? tasks
+        .map((task) => renderTaskCard(task, task.object ?? { name: 'Объект не указан' }))
+        .join('')
+    : '<div class="emptyObject"><p>Активных задач пока нет</p></div>';
+  photoSlider.mount(elements.workerObjectsList);
+}
+
+async function openManagerTaskForm() {
+  const [objectsResponse, workersResponse] = await Promise.all([
+    apiFetch('/api/v1/manager/objects'),
+    apiFetch('/api/v1/manager/workers'),
+  ]);
+  const objects = await readResponseBody(objectsResponse);
+  const workers = await readResponseBody(workersResponse);
+  if (!objectsResponse.ok || !workersResponse.ok) return showMessage('Не удалось загрузить форму');
+  elements.managerObject.innerHTML = objects
+    .map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`)
+    .join('');
+  elements.managerWorker.innerHTML = workers.length
+    ? workers
+        .map((item) => `<option value="${item.id}">${escapeHtml(item.name || item.email)}</option>`)
+        .join('')
+    : '<option value="">Нет доступных исполнителей</option>';
+  elements.managerTaskForm.querySelector('button[type="submit"]').disabled = !workers.length;
+  elements.managerTaskForm.reset();
+  managerSelectedFiles = [];
+  managerStepCount = 0;
+  elements.managerSteps.innerHTML = '';
+  addManagerStep();
+  renderManagerPhotoPreview();
+  openModal('managerTask');
+}
+
+function addManagerStep() {
+  managerStepCount += 1;
+  elements.managerSteps.insertAdjacentHTML(
+    'beforeend',
+    `<section class="managerStepFields"><strong>Этап <span>${managerStepCount}</span></strong><label>Название<input data-manager-step-title required /></label><label>Описание<textarea data-manager-step-description required></textarea></label><button type="button" class="secondaryButton" data-remove-manager-step>Удалить этап</button></section>`,
+  );
+  renumberManagerSteps();
+}
+
+function removeManagerStep(step) {
+  if (elements.managerSteps.children.length === 1)
+    return showMessage('Минимум один этап обязателен');
+  step?.remove();
+  renumberManagerSteps();
+}
+
+function renumberManagerSteps() {
+  [...elements.managerSteps.children].forEach((step, index) => {
+    step.querySelector('strong span').textContent = index + 1;
+  });
+}
+
+function renderManagerPhotoPreview() {
+  elements.managerPhotoPreview.innerHTML = managerSelectedFiles
+    .map(
+      (file, index) =>
+        `<figure><img src="${URL.createObjectURL(file)}" alt="${escapeHtml(file.name)}" /><button type="button" data-remove-manager-photo="${index}" aria-label="Удалить фото">×</button></figure>`,
+    )
+    .join('');
+}
+
+function closeManagerForm() {
+  const dirty =
+    elements.managerTaskForm.querySelector('input:not([type="radio"]):not([type="file"])')?.value ||
+    managerSelectedFiles.length;
+  if (dirty && !window.confirm('Закрыть окно? Введённые данные будут потеряны.')) return;
+  closeModal();
+  currentSection = 'tasks';
+  updateBottomNavigation();
+}
+
+async function submitManagerTask(event) {
+  event.preventDefault();
+  const steps = [...elements.managerSteps.children].map((step) => ({
+    title: step.querySelector('[data-manager-step-title]').value.trim(),
+    description: step.querySelector('[data-manager-step-description]').value.trim(),
+  }));
+  const payload = {
+    operationId: crypto.randomUUID(),
+    objectId: elements.managerObject.value,
+    assigneeId: elements.managerWorker.value,
+    title: document.querySelector('#managerTitle').value.trim(),
+    description: document.querySelector('#managerDescription').value.trim(),
+    location: document.querySelector('#managerLocation').value.trim(),
+    priority: new FormData(elements.managerTaskForm).get('managerPriority'),
+    accessStatus: new FormData(elements.managerTaskForm).get('managerAccess'),
+    position: Number(document.querySelector('#managerPosition').value),
+    steps,
+  };
+  const summary = `${payload.title}\nЭтапов: ${steps.length}\nФото: ${managerSelectedFiles.length}\nПозиция: ${payload.position}`;
+  if (!window.confirm(`Поставить задачу?\n\n${summary}`)) return;
+  await sendManagerTask(payload);
+}
+
+async function sendManagerTask(payload) {
+  const data = new FormData();
+  data.append('payload', JSON.stringify(payload));
+  managerSelectedFiles.forEach((file) => data.append('photos', file));
+  let response = await apiFetch('/api/v1/manager/tasks', { method: 'POST', body: data });
+  let body = await readResponseBody(response);
+  if (response.status === 409 && getApiMessage(body)?.includes('уже есть задача')) {
+    if (!window.confirm(`${getApiMessage(body)}\n\nВсё равно поставить?`)) return;
+    payload.forceUrgent = true;
+    data.set('payload', JSON.stringify(payload));
+    response = await apiFetch('/api/v1/manager/tasks', { method: 'POST', body: data });
+    body = await readResponseBody(response);
+  }
+  if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось поставить задачу');
+  closeModal();
+  currentSection = 'tasks';
+  updateBottomNavigation();
+  await loadManagerTasks();
+  showMessage('Задача поставлена');
+}
+
+async function updateManagerTask(field, value) {
+  if (!selectedTaskId || !isManager()) return;
+  if (
+    field === 'accessStatus' &&
+    value === 'CLOSED' &&
+    selectedTask.status === 'IN_PROGRESS' &&
+    !window.confirm('Задача находится в работе. После закрытия сотрудник потеряет к ней доступ.')
+  )
+    return renderSelectedTask();
+  const response = await apiFetch(`/api/v1/manager/tasks/${selectedTaskId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ operationId: crypto.randomUUID(), [field]: value }),
+  });
+  const body = await readResponseBody(response);
+  if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось изменить задачу');
+  await Promise.all([reloadTaskDetails(), loadManagerTasks()]);
+  showMessage('Параметры обновлены');
+}
+
+async function deleteManagerTask() {
+  if (!selectedTask) return;
+  const needsReason = ['ACCEPTED', 'IN_PROGRESS', 'PAUSED'].includes(selectedTask.status);
+  const reason = window
+    .prompt(
+      `Удалить задачу?\nЗадача будет удалена из активного списка сотрудника.${needsReason ? '\nУкажите причину удаления:' : ''}`,
+    )
+    ?.trim();
+  if (reason === undefined || (needsReason && !reason))
+    return needsReason && showMessage('Причина удаления обязательна');
+  if (!window.confirm(`Да, удалить «${selectedTask.title}»?`)) return;
+  const response = await apiFetch(`/api/v1/manager/tasks/${selectedTask.id}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ operationId: crypto.randomUUID(), reason }),
+  });
+  const body = await readResponseBody(response);
+  if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось удалить задачу');
+  selectedTask = null;
+  selectedTaskId = null;
+  await loadManagerTasks();
+  openView('myWork');
+  showMessage('Задача удалена');
+}
+
 function renderTaskCard(task, object) {
   const completed = task.steps.filter((step) => step.status === 'COMPLETED').length;
   const percent = task.steps.length ? Math.round((completed / task.steps.length) * 100) : 0;
   const gallery = PhotoSlider.render(task.photos, {
     id: `task-list-${task.id}`,
     emptyText: 'Фотографий пока нет',
-    locked: isTaskAccessLocked(),
+    locked: !isManager() && (isTaskAccessLocked() || task.isAccessLocked),
   });
-  const location = task.location || object.name;
-  return `<article class="taskCard taskFeedCard ${taskCardStatusClass(task.status)}" data-worker-task-id="${task.id}" role="button" tabindex="0"><div class="taskFeedCardHeader"><h3>${escapeHtml(task.title)}</h3></div>${gallery}<p class="taskLocation">${escapeHtml(location)}</p><div class="taskProgressBlock"><div class="taskProgressLine"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div><small>${completed} из ${task.steps.length} этапов выполнено</small></div></article>`;
+  const location = taskLocationLabel(task, object);
+  const statusClass =
+    task.priority === 'URGENT' && task.status !== 'IN_PROGRESS'
+      ? 'is-paused'
+      : taskCardStatusClass(task.status);
+  return `<article class="taskCard taskFeedCard ${statusClass}" data-worker-task-id="${task.id}" data-business-locked="${Boolean(task.isAccessLocked)}" role="button" tabindex="0"><div class="taskFeedCardHeader"><h3>${escapeHtml(task.title)}</h3></div>${gallery}<p class="taskLocation">${escapeHtml(location)}</p><div class="taskProgressBlock"><div class="taskProgressLine"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div><small>${completed} из ${task.steps.length} этапов выполнено</small></div></article>`;
 }
 
 function taskCardStatusClass(status) {
@@ -751,8 +1122,13 @@ function taskCardStatusClass(status) {
       ON_REVIEW: 'is-review',
       COMPLETED: 'is-accepted',
       CANCELLED: 'is-paused',
+      PAUSED: 'is-paused',
     }[status] ?? ''
   );
+}
+
+function taskLocationLabel(task, object = task.object) {
+  return [object?.name, task.location].filter(Boolean).join(' / ') || 'Место не указано';
 }
 
 async function runWorkerTaskAction(action, taskId) {
@@ -766,7 +1142,7 @@ async function runWorkerTaskAction(action, taskId) {
 }
 
 async function openTaskDetails(taskId) {
-  if (isTaskAccessLocked()) return notifyTaskLocked();
+  if (!isManager() && isTaskAccessLocked()) return notifyTaskLocked();
   selectedTaskId = taskId;
   selectedTask = null;
   taskListScrollY = window.scrollY;
@@ -776,13 +1152,17 @@ async function openTaskDetails(taskId) {
 }
 
 async function reloadTaskDetails() {
-  if (isTaskAccessLocked()) {
+  if (!isManager() && isTaskAccessLocked()) {
     openView('myWork', { preserveScroll: true });
     return notifyTaskLocked();
   }
   if (!selectedTaskId) return;
   try {
-    const response = await apiFetch(`/api/v1/worker/tasks/${selectedTaskId}`);
+    const response = await apiFetch(
+      isManager()
+        ? `/api/v1/manager/tasks/${selectedTaskId}`
+        : `/api/v1/worker/tasks/${selectedTaskId}`,
+    );
     const body = await readResponseBody(response);
     if (!response.ok) {
       renderTaskDetailError(
@@ -807,6 +1187,9 @@ function renderTaskDetailLoading() {
   elements.taskAssignee.textContent = '';
   elements.taskPhotos.innerHTML = '<p>Загружаем фотографии…</p>';
   elements.stepsList.innerHTML = '<p>Загружаем этапы…</p>';
+  elements.taskDetailProgressLine.style.width = '0%';
+  elements.taskDetailProgressPercent.textContent = '0%';
+  elements.taskDetailProgressCount.textContent = 'Загружаем этапы…';
 }
 
 function renderTaskDetailError(message) {
@@ -823,11 +1206,18 @@ function renderSelectedTask() {
   if (!selectedTask) return;
   photoSlider.clear(views.taskDetail);
   elements.taskTitle.textContent = selectedTask.title;
-  elements.taskObject.textContent = selectedTask.object?.name ?? 'Объект не указан';
+  elements.taskObject.textContent = taskLocationLabel(selectedTask);
   elements.taskDescription.textContent = selectedTask.description || 'Описание не указано';
   elements.taskAssignee.textContent = `Исполнитель: ${selectedTask.assignee?.name ?? 'не назначен'}`;
   elements.taskMeta.hidden = false;
   elements.taskMeta.textContent = taskStatusLabel(selectedTask.status);
+  const completedSteps = selectedTask.steps.filter((step) => step.status === 'COMPLETED').length;
+  const progress = selectedTask.steps.length
+    ? Math.round((completedSteps / selectedTask.steps.length) * 100)
+    : 0;
+  elements.taskDetailProgressLine.style.width = `${progress}%`;
+  elements.taskDetailProgressPercent.textContent = `${progress}%`;
+  elements.taskDetailProgressCount.textContent = `${completedSteps} из ${selectedTask.steps.length} этапов выполнено`;
   renderSelectedTaskControl();
   elements.taskPhotos.innerHTML = PhotoSlider.render(selectedTask.photos, {
     id: `task-${selectedTask.id}`,
@@ -836,22 +1226,38 @@ function renderSelectedTask() {
   elements.stepsList.innerHTML = selectedTask.steps.length
     ? selectedTask.steps.map(renderTaskStep).join('')
     : '<div class="emptyObject"><p>У задачи нет этапов</p></div>';
+  renderStepWorkflowFooter();
+  if (!isManager()) {
+    elements.taskHelpIsland.hidden =
+      ['COMPLETED', 'CANCELLED'].includes(selectedTask.status) || Boolean(selectedTask.deletedAt);
+    elements.taskHelpIsland.innerHTML =
+      '<button class="helpButton" type="button" data-open-modal="helpRequest">Нужна помощь?</button>';
+  }
+  renderManagerControls();
 }
 
 function renderSelectedTaskControl() {
   const control = views.taskDetail.querySelector('[data-task-status-control]');
+  if (isManager()) {
+    control.disabled = true;
+    control.dataset.detailTaskAction = '';
+    control.querySelector('b').textContent = taskStatusLabel(selectedTask.status);
+    control.querySelector('small').textContent =
+      `Исполнитель: ${selectedTask.assignee?.name ?? 'не назначен'}`;
+    return;
+  }
   const action =
     selectedTask.status === 'ASSIGNED'
       ? 'accept'
       : selectedTask.status === 'ACCEPTED'
         ? 'start'
         : selectedTask.status === 'IN_PROGRESS'
-          ? 'complete'
+          ? 'pause'
           : null;
   control.disabled = taskDetailActionPending || !action;
   control.dataset.detailTaskAction = action ?? '';
   control.querySelector('b').textContent = action
-    ? { accept: 'Принять задачу', start: 'Начать задачу', complete: 'Завершить задачу' }[action]
+    ? { accept: 'Принять задачу', start: 'Начать задачу', pause: 'Поставить на паузу' }[action]
     : taskStatusLabel(selectedTask.status);
   control.querySelector('small').textContent = action
     ? 'Действие будет сохранено в истории.'
@@ -859,23 +1265,41 @@ function renderSelectedTaskControl() {
 }
 
 function renderTaskStep(step, index) {
-  const taskAllowsStepActions = selectedTask.status === 'IN_PROGRESS';
-  const action = taskAllowsStepActions
-    ? step.status === 'CREATED' || step.status === 'REOPENED'
-      ? 'start'
-      : step.status === 'IN_PROGRESS'
-        ? 'complete'
-        : null
+  const currentStep = ['IN_PROGRESS', 'PAUSED'].includes(selectedTask.status)
+    ? selectedTask.steps.find((candidate) => candidate.status !== 'COMPLETED')
     : null;
-  const actionLabel = action === 'start' ? 'Начать этап' : 'Завершить этап';
-  const photos = PhotoSlider.render(step.photos, {
-    id: `step-${step.id}`,
-    emptyText: 'Фотографий этапа нет',
-  });
-  if (action || step.status === 'IN_PROGRESS') {
-    return `<article class="stepTimelineCurrent is-current"><span class="stepNumber">${index + 1}</span><div class="currentStepBubble"><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description || 'Описание не указано')}</p><em>${taskStepStatusLabel(step.status)}</em>${photos}${action ? `<button type="button" data-detail-step-action="${action}" data-step-id="${step.id}" ${taskDetailActionPending ? 'disabled' : ''}>${actionLabel}</button>` : ''}${step.status === 'IN_PROGRESS' ? `<button class="linkButton" type="button" data-upload-detail-photo data-step-id="${step.id}" ${taskDetailActionPending ? 'disabled' : ''}>Добавить фото</button>` : ''}</div></article>`;
+  const isWorkerCurrent = !isManager() && currentStep?.id === step.id;
+  const isPaused = isWorkerCurrent && selectedTask.status === 'PAUSED';
+  const isBlocked = isPaused && selectedTask.isWorkBlocked;
+  const pause = latestPauseForStep(step.id);
+  const reply = pause
+    ? selectedTask.messages.find(
+        (message) => message.kind === 'MANAGER_REPLY' && message.parentId === pause.id,
+      )
+    : null;
+  if (isWorkerCurrent) {
+    const pausePanel = pause
+      ? `<section class="stepStateMessage ${isBlocked ? 'is-blocked' : reply?.decision === 'CONTINUE' ? 'is-success' : 'is-paused'}"><strong>Причина паузы</strong><p>${escapeHtml(pause.body)}</p><time>${formatLocalDateTime(pause.createdAt)}</time>${reply ? `<strong>Ответ руководителя</strong><p>${escapeHtml(reply.body)}</p><time>${formatLocalDateTime(reply.createdAt)}</time>` : '<small>Ожидайте ответа руководителя.</small>'}</section>`
+      : '';
+    const actions = isPaused
+      ? `<p class="stepStoppedText">${isBlocked ? 'Работы по задаче остановлены. Выберите другую задачу.' : 'Работа приостановлена. Ожидайте ответ руководителя.'}</p>`
+      : `<div class="stepWorkActions"><button class="stepPhotoButton" type="button" data-upload-detail-photo data-step-id="${step.id}" ${taskDetailActionPending ? 'disabled' : ''}><span aria-hidden="true">▣</span> Сделать фото</button><button class="stepCompleteButton" type="button" data-detail-step-action="complete" data-step-id="${step.id}" ${taskDetailActionPending ? 'disabled' : ''}>${taskDetailActionPending ? 'Завершаем…' : 'Завершить этап'}</button></div>`;
+    return `<article class="workStep is-current ${isPaused ? 'is-paused' : ''}" data-active-step><div class="currentStepBubble"><h3>${escapeHtml(cleanStepTitle(step.title))}</h3><p>${escapeHtml(step.description || 'Описание не указано')}</p>${pausePanel}${actions}</div>${index < selectedTask.steps.length - 1 ? '<span class="workStepArrow" aria-hidden="true">↓</span>' : ''}</article>`;
   }
-  return `<article class="stepTimelineFuture ${step.status === 'COMPLETED' ? 'is-complete' : ''}"><span class="${step.status === 'COMPLETED' ? 'stepCompleteMark' : 'stageLock'}" aria-hidden="true">${step.status === 'COMPLETED' ? '✓' : ''}</span><div><h3>${escapeHtml(step.title)}</h3><p>${escapeHtml(step.description || 'Описание не указано')}</p>${photos}</div><em>${taskStepStatusLabel(step.status)}</em><i aria-hidden="true">›</i></article>`;
+  const completed = step.status === 'COMPLETED' && Boolean(step.completedAt);
+  return `<article class="workStep ${completed ? 'is-complete' : ''}"><div class="workStepCompact"><h3>${escapeHtml(cleanStepTitle(step.title))}</h3>${completed ? '<small>✓ Выполнено</small>' : ''}</div>${index < selectedTask.steps.length - 1 ? '<span class="workStepArrow" aria-hidden="true">↓</span>' : ''}</article>`;
+}
+
+function cleanStepTitle(title) {
+  return String(title ?? '')
+    .replace(/^\s*(?:этап\s*№?\s*\d+|\d+\s*[.)-]?\s*этап)\s*[.):-]?\s*/i, '')
+    .trim();
+}
+
+function renderManagerControls() {
+  if (!isManager()) return;
+  elements.taskHelpIsland.hidden = false;
+  elements.taskHelpIsland.innerHTML = `<h3>Управление задачей</h3><div class="managerControls"><label>Приоритет<select data-manager-update="priority"><option value="NORMAL" ${selectedTask.priority === 'NORMAL' ? 'selected' : ''}>Обычная</option><option value="URGENT" ${selectedTask.priority === 'URGENT' ? 'selected' : ''}>Срочная</option></select></label><label>Доступ<select data-manager-update="accessStatus"><option value="OPEN" ${selectedTask.accessStatus === 'OPEN' ? 'selected' : ''}>Открытая</option><option value="CLOSED" ${selectedTask.accessStatus === 'CLOSED' ? 'selected' : ''}>Закрытая</option></select></label><button type="button" class="dangerButton" data-manager-delete>Удалить задачу</button></div>`;
 }
 
 async function hydrateDetailPhotos() {
@@ -888,12 +1312,53 @@ async function runDetailAction(kind, action, id) {
   taskDetailActionPending = true;
   renderSelectedTaskControl();
   try {
+    if (kind === 'task' && action === 'pause') {
+      const message = window.prompt('Укажите причину паузы')?.trim();
+      if (!message) return showMessage('Укажите причину паузы');
+      const response = await apiFetch(`/api/v1/worker/tasks/${id}/pause`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      const body = await readResponseBody(response);
+      if (!response.ok)
+        return showMessage(getApiMessage(body) || 'Не удалось поставить задачу на паузу.');
+      await Promise.all([reloadTaskDetails(), loadWorkerObjects(), loadHistory(true)]);
+      return showMessage('Сообщение отправлено руководителю');
+    }
+    const completesTask =
+      kind === 'step' &&
+      selectedTask.steps.filter((step) => step.status !== 'COMPLETED').length === 1;
     const base = kind === 'task' ? `/api/v1/tasks/${id}` : `/api/v1/task-steps/${id}`;
-    const response = await apiFetch(`${base}/${action}`, { method: 'PATCH' });
+    const response = await apiFetch(`${base}/${action}`, {
+      method: 'PATCH',
+      headers:
+        kind === 'step' && action === 'complete'
+          ? { 'content-type': 'application/json' }
+          : undefined,
+      body:
+        kind === 'step' && action === 'complete'
+          ? JSON.stringify({ operationId: crypto.randomUUID() })
+          : undefined,
+    });
     const body = await readResponseBody(response);
     if (!response.ok) return showMessage(getApiMessage(body) || 'Действие сейчас недоступно.');
     await Promise.all([reloadTaskDetails(), loadWorkerObjects(), loadHistory(true)]);
-    showMessage('Статус обновлён');
+    if (kind === 'step') {
+      if (completesTask) {
+        taskCompletionOperationId = crypto.randomUUID();
+        openModal('completeTask');
+        return;
+      }
+      window.setTimeout(
+        () =>
+          views.taskDetail
+            .querySelector('[data-active-step]')
+            ?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
+        40,
+      );
+      showMessage('Этап выполнен. Работайте со следующим этапом.');
+    } else showMessage('Статус обновлён');
   } catch {
     showMessage('Не удалось выполнить действие. Проверьте соединение и повторите попытку.');
   } finally {
@@ -902,41 +1367,141 @@ async function runDetailAction(kind, action, id) {
   }
 }
 
-function openDetailPhotoPicker(stepId) {
-  if (isTaskAccessLocked()) return notifyTaskLocked();
-  if (taskDetailActionPending || !selectedTaskId) return;
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/jpeg,image/png,image/webp';
-  input.addEventListener('change', async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    taskDetailActionPending = true;
-    const form = new FormData();
-    form.append('file', file);
-    form.append('taskId', selectedTaskId);
-    if (stepId) form.append('taskStepId', stepId);
-    try {
-      const response = await apiFetch('/api/v1/artifacts/photos', { method: 'POST', body: form });
-      const body = await readResponseBody(response);
-      if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось загрузить фото.');
-      await Promise.all([reloadTaskDetails(), loadHistory(true)]);
-      showMessage('Фото добавлено');
-    } catch {
-      showMessage('Не удалось загрузить фото. Проверьте соединение и повторите попытку.');
-    } finally {
-      taskDetailActionPending = false;
-    }
-  });
-  input.click();
+function requestStepCompletion(stepId) {
+  if (taskDetailActionPending || !stepId) return;
+  const step = selectedTask?.steps.find((candidate) => candidate.id === stepId);
+  if (!step || step.status !== 'IN_PROGRESS') return;
+  if ((step.photos?.length ?? 0) < 2) {
+    showMessage('Загрузите минимум две фотографии, чтобы завершить этап.');
+    return;
+  }
+  pendingStepCompletionId = stepId;
+  openModal('completeStep');
 }
 
-function taskStepStatusLabel(status) {
-  return (
-    { CREATED: 'Ожидает', IN_PROGRESS: 'В работе', COMPLETED: 'Выполнен', CANCELLED: 'Отменён' }[
-      status
-    ] ?? status
-  );
+async function completeSelectedTask() {
+  if (!selectedTaskId || taskDetailActionPending) return;
+  taskDetailActionPending = true;
+  const operationId = taskCompletionOperationId ?? crypto.randomUUID();
+  taskCompletionOperationId = operationId;
+  const button = modals.completeTask.querySelector('[data-confirm-complete-task]');
+  button.disabled = true;
+  try {
+    const response = await apiFetch(`/api/v1/tasks/${selectedTaskId}/complete`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ operationId }),
+    });
+    const body = await readResponseBody(response);
+    if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось завершить задачу.');
+    calculateCompletionBonus();
+    await Promise.all([loadWorkerObjects(), loadHistory(true), loadWorkerMessages()]);
+    openModal('taskCompleted');
+  } finally {
+    taskDetailActionPending = false;
+    button.disabled = false;
+  }
+}
+
+function openDetailPhotoPicker(stepId) {
+  if (isTaskAccessLocked()) return notifyTaskLocked();
+  if (taskDetailActionPending || !selectedTaskId || !stepId) return;
+  void openShiftCamera('TASK_STEP', stepId);
+}
+
+function latestPauseForStep(stepId) {
+  return [...(selectedTask.messages ?? [])]
+    .reverse()
+    .find((message) => message.kind === 'PAUSE_REQUEST' && message.taskStepId === stepId);
+}
+
+function renderStepWorkflowFooter() {
+  elements.taskPauseInfo.hidden = true;
+  elements.taskPauseInfo.innerHTML = '';
+}
+
+function formatLocalDateTime(value) {
+  if (!value) return '';
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+async function loadWorkerMessages() {
+  if (['FOREMAN', 'DIRECTOR', 'CREATOR'].includes(currentUser?.role)) return loadManagerMessages();
+  const [messagesResponse, archiveResponse] = await Promise.all([
+    apiFetch('/api/v1/worker/messages'),
+    apiFetch('/api/v1/worker/archive'),
+  ]);
+  const messages = await readResponseBody(messagesResponse);
+  const archive = await readResponseBody(archiveResponse);
+  elements.workerMessagesList.innerHTML =
+    messagesResponse.ok && messages.length
+      ? messages
+          .map(
+            (message) =>
+              `<article class="whiteCard messageCard"><strong>${message.kind === 'MANAGER_REPLY' ? 'Ответ руководителя' : message.kind === 'HELP_REQUEST' ? 'Запрос помощи' : 'Пауза'}</strong><p>${escapeHtml(message.body)}</p><small>${escapeHtml(message.task.title)}</small></article>`,
+          )
+          .join('')
+      : '<div class="emptyObject"><p>Сообщений пока нет</p></div>';
+  elements.workerArchiveList.innerHTML =
+    archiveResponse.ok && archive.length
+      ? archive
+          .map(
+            (task) =>
+              `<article class="whiteCard messageCard"><strong>${escapeHtml(task.title)}</strong><p>${escapeHtml(task.object?.name ?? '')}</p><small>${task.steps.length} этапов</small></article>`,
+          )
+          .join('')
+      : '<div class="emptyObject"><p>Архив пока пуст</p></div>';
+}
+
+async function loadManagerMessages() {
+  const [messagesResponse, archiveResponse] = await Promise.all([
+    apiFetch('/api/v1/manager/messages'),
+    apiFetch('/api/v1/manager/archive'),
+  ]);
+  const messages = await readResponseBody(messagesResponse);
+  const archive = await readResponseBody(archiveResponse);
+  elements.workerMessagesList.innerHTML =
+    messagesResponse.ok && messages.length
+      ? messages
+          .map(
+            (message) =>
+              `<article class="whiteCard messageCard"><strong>${message.kind === 'HELP_REQUEST' ? 'Нужна помощь' : 'Задача на паузе'}</strong><p>${escapeHtml(message.body)}</p><small>${escapeHtml(message.task.object?.name ?? '')} · ${escapeHtml(message.task.title)}</small><div class="stepWorkActions"><button data-manager-reply="CONTINUE" data-message-id="${message.id}">Продолжить работу</button><button data-manager-reply="STOP" data-message-id="${message.id}">Не продолжать</button></div></article>`,
+          )
+          .join('')
+      : '<div class="emptyObject"><p>Новых обращений нет</p></div>';
+  elements.workerArchiveList.innerHTML =
+    archiveResponse.ok && archive.length
+      ? archive
+          .map(
+            (task) =>
+              `<article class="whiteCard messageCard"><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.object?.name ?? '')}</small></article>`,
+          )
+          .join('')
+      : '<div class="emptyObject"><p>Архив пока пуст</p></div>';
+}
+
+async function replyToWorkerMessage(messageId, decision) {
+  const message = window.prompt('Ответ сотруднику')?.trim();
+  if (!message) return showMessage('Введите ответ сотруднику');
+  const response = await apiFetch(`/api/v1/manager/messages/${messageId}/reply`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message, decision }),
+  });
+  const body = await readResponseBody(response);
+  if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось отправить ответ');
+  await loadManagerMessages();
+  showMessage('Ответ отправлен сотруднику');
+}
+
+function calculateCompletionBonus() {
+  return 0;
 }
 
 async function loadHistory(reset) {
@@ -945,10 +1510,24 @@ async function loadHistory(reset) {
     elements.historyList.innerHTML = '<p>Загружаем историю…</p>';
   }
   try {
-    const url = `/api/v1/history?limit=20${historyCursor ? `&cursor=${encodeURIComponent(historyCursor)}` : ''}`;
+    if (isManager() && !managerHistoryWorker) {
+      const workersResponse = await apiFetch('/api/v1/manager/workers');
+      const workers = await readResponseBody(workersResponse);
+      if (!workersResponse.ok || !Array.isArray(workers) || workers.length === 0)
+        throw new Error('No workers');
+      managerHistoryWorker = workers[0];
+    }
+    const pagination = `limit=20${historyCursor ? `&cursor=${encodeURIComponent(historyCursor)}` : ''}`;
+    const url = isManager()
+      ? `/api/v1/manager/history?workerId=${encodeURIComponent(managerHistoryWorker.id)}&${pagination}`
+      : `/api/v1/history?${pagination}`;
     const response = await apiFetch(url);
     const body = await readResponseBody(response);
     if (!response.ok) throw new Error();
+    if (isManager()) {
+      managerHistoryWorker = body.worker ?? managerHistoryWorker;
+      elements.historyHeading.textContent = `История — ${managerHistoryWorker.name || managerHistoryWorker.email}`;
+    }
     if (reset && body.items.length === 0)
       elements.historyList.innerHTML =
         '<div class="emptyObject"><p>История действий пока пуста</p></div>';
@@ -1015,13 +1594,23 @@ function eventLabel(type) {
       STEP_STARTED: 'Начал этап',
       STEP_COMPLETED: 'Завершил этап',
       PHOTO_UPLOADED: 'Добавил фотографию',
+      TASK_PAUSED: 'Поставил задачу на паузу',
+      HELP_REQUEST: 'Запросил помощь',
+      MANAGER_REPLY: 'Получил ответ руководителя',
     }[type] ?? 'Выполнил действие'
   );
 }
 
 function taskStatusLabel(status) {
   return (
-    { IN_PROGRESS: 'В работе', ACCEPTED: 'Принята', ON_REVIEW: 'На проверке' }[status] ?? status
+    {
+      ASSIGNED: 'Не начата',
+      IN_PROGRESS: 'В работе',
+      ACCEPTED: 'Принята',
+      PAUSED: 'На паузе',
+      ON_REVIEW: 'На проверке',
+      COMPLETED: 'Выполнена',
+    }[status] ?? status
   );
 }
 
@@ -1138,7 +1727,7 @@ function scheduleShiftCamera(mode, button) {
   }, 210);
 }
 
-async function openShiftCamera(mode) {
+async function openShiftCamera(mode, taskStepId = null) {
   pendingCameraMode = null;
   cleanupCameraAttempt({ keepOperationId: false });
   cameraAttempt = {
@@ -1150,14 +1739,21 @@ async function openShiftCamera(mode) {
     isSubmitting: false,
     facingMode: 'environment',
     cameraCount: 0,
+    taskStepId,
   };
 
   elements.shiftCameraTitle.textContent =
-    mode === 'START' ? 'Фото перед началом смены' : 'Фото перед завершением смены';
+    mode === 'START'
+      ? 'Фото перед началом смены'
+      : mode === 'TASK_STEP'
+        ? 'Фото текущего этапа'
+        : 'Фото перед завершением смены';
   elements.shiftCameraText.textContent =
     mode === 'START'
       ? 'Расположите лицо в кадре и сделайте фотографию.'
-      : 'Сделайте фотографию для подтверждения завершения смены.';
+      : mode === 'TASK_STEP'
+        ? 'Сделайте фотографию выполненной работы.'
+        : 'Сделайте фотографию для подтверждения завершения смены.';
 
   resetCameraUi();
   openModal('shiftCamera');
@@ -1189,8 +1785,9 @@ async function startCameraStream(facingMode = cameraAttempt.facingMode || 'envir
     elements.shiftCameraVideo.hidden = false;
     elements.shiftCameraPreview.hidden = true;
     elements.shiftCameraState.hidden = true;
-    elements.shiftCameraCaptureButton.disabled = false;
     await elements.shiftCameraVideo.play();
+    await waitForVideoFrame(elements.shiftCameraVideo);
+    elements.shiftCameraCaptureButton.disabled = false;
     try {
       const devices = await navigator.mediaDevices.enumerateDevices?.();
       cameraAttempt.cameraCount = devices ? CameraUtils.countVideoInputs(devices) : 1;
@@ -1223,30 +1820,57 @@ async function captureCameraPhoto() {
   }
 
   const video = elements.shiftCameraVideo;
+  elements.shiftCameraCaptureButton.disabled = true;
+  setCameraLoading('Подготавливаем фотографию...');
+  try {
+    await waitForVideoFrame(video);
+    await nextAnimationFrame();
+  } catch {
+    setCameraError('Не удалось подготовить фотографию. Сделайте снимок ещё раз.');
+    elements.shiftCameraCaptureButton.disabled = false;
+    return;
+  }
   const width = video.videoWidth;
   const height = video.videoHeight;
 
   if (!width || !height) {
-    setCameraError('Камера ещё не готова. Повторите попытку.');
+    setCameraError('Не удалось подготовить фотографию. Сделайте снимок ещё раз.');
+    elements.shiftCameraCaptureButton.disabled = false;
     return;
   }
 
   const canvas = elements.shiftCameraCanvas;
   canvas.width = width;
   canvas.height = height;
-  canvas.getContext('2d').drawImage(video, 0, 0, width, height);
+  const context = canvas.getContext('2d');
+  if (!context) {
+    setCameraError('Не удалось подготовить фотографию. Сделайте снимок ещё раз.');
+    elements.shiftCameraCaptureButton.disabled = false;
+    return;
+  }
+  context.drawImage(video, 0, 0, width, height);
 
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.9));
 
   if (!blob) {
-    setCameraError('Не удалось сделать фотографию. Повторите попытку.');
+    setCameraError('Не удалось подготовить фотографию. Сделайте снимок ещё раз.');
+    elements.shiftCameraCaptureButton.disabled = false;
     return;
   }
 
   clearCameraPreview();
   cameraAttempt.blob = blob;
   cameraAttempt.previewUrl = URL.createObjectURL(blob);
-  elements.shiftCameraPreview.src = cameraAttempt.previewUrl;
+  try {
+    await loadPreviewImage(elements.shiftCameraPreview, cameraAttempt.previewUrl);
+  } catch {
+    clearCameraPreview();
+    setCameraError('Не удалось отобразить фотографию. Переснимите кадр.');
+    elements.shiftCameraConfirmButton.hidden = true;
+    elements.shiftCameraConfirmButton.disabled = true;
+    elements.shiftCameraCaptureButton.disabled = false;
+    return;
+  }
   elements.shiftCameraPreview.hidden = false;
   elements.shiftCameraVideo.hidden = true;
   elements.shiftCameraState.hidden = true;
@@ -1257,6 +1881,54 @@ async function captureCameraPhoto() {
   elements.shiftCameraConfirmButton.disabled = false;
   elements.shiftCameraError.hidden = true;
   stopCameraStream();
+}
+
+function waitForVideoFrame(video, timeoutMs = 4_000) {
+  if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0)
+    return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error('Video frame timeout'));
+    }, timeoutMs);
+    const ready = () => {
+      if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      window.clearTimeout(timeout);
+      video.removeEventListener('loadeddata', ready);
+      video.removeEventListener('canplay', ready);
+    };
+    video.addEventListener('loadeddata', ready);
+    video.addEventListener('canplay', ready);
+  });
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+function loadPreviewImage(image, source) {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      image.removeEventListener('load', loaded);
+      image.removeEventListener('error', failed);
+    };
+    const loaded = () => {
+      cleanup();
+      if (image.naturalWidth > 0 && image.naturalHeight > 0) resolve();
+      else reject(new Error('Preview is empty'));
+    };
+    const failed = () => {
+      cleanup();
+      reject(new Error('Preview failed'));
+    };
+    image.addEventListener('load', loaded, { once: true });
+    image.addEventListener('error', failed, { once: true });
+    image.src = source;
+  });
 }
 
 async function retakeCameraPhoto() {
@@ -1289,19 +1961,27 @@ async function submitCameraPhoto() {
   const formData = new FormData();
   formData.append(
     'file',
-    new File([cameraAttempt.blob], `${cameraAttempt.mode.toLowerCase()}-shift-photo.jpg`, {
+    new File([cameraAttempt.blob], `${cameraAttempt.mode.toLowerCase()}-photo.jpg`, {
       type: 'image/jpeg',
     }),
   );
-  formData.append('capturedAt', new Date().toISOString());
-  formData.append('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
-  formData.append('operationId', cameraAttempt.operationId);
+  if (cameraAttempt.mode === 'TASK_STEP') {
+    formData.append('taskId', selectedTaskId);
+    formData.append('taskStepId', cameraAttempt.taskStepId);
+    formData.append('operationId', cameraAttempt.operationId);
+  } else {
+    formData.append('capturedAt', new Date().toISOString());
+    formData.append('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+    formData.append('operationId', cameraAttempt.operationId);
+  }
 
   try {
     const endpoint =
       cameraAttempt.mode === 'START'
         ? '/api/v1/work-shifts/start-with-photo'
-        : '/api/v1/work-shifts/finish-with-photo';
+        : cameraAttempt.mode === 'TASK_STEP'
+          ? '/api/v1/artifacts/photos'
+          : '/api/v1/work-shifts/finish-with-photo';
     const response = await apiFetch(endpoint, {
       method: 'POST',
       body: formData,
@@ -1317,9 +1997,12 @@ async function submitCameraPhoto() {
       return;
     }
 
+    const submittedMode = cameraAttempt.mode;
     cleanupCameraAttempt({ keepOperationId: false });
     closeModal();
-    await refreshShiftState();
+    if (submittedMode === 'TASK_STEP')
+      await Promise.all([reloadTaskDetails(), loadWorkerObjects(), loadHistory(true)]);
+    else await refreshShiftState();
   } catch {
     cameraAttempt.isSubmitting = false;
     elements.shiftCameraConfirmButton.disabled = false;
@@ -1379,6 +2062,7 @@ function cleanupCameraAttempt({ keepOperationId }) {
     isSubmitting: false,
     facingMode: keepOperationId ? cameraAttempt.facingMode : 'environment',
     cameraCount: keepOperationId ? cameraAttempt.cameraCount : 0,
+    taskStepId: keepOperationId ? cameraAttempt.taskStepId : null,
   };
 }
 
@@ -1412,6 +2096,13 @@ function formatCoinUnits(units) {
 
 function formatApprovedCoinUnits(units) {
   return Math.floor((Number.isSafeInteger(units) ? units : 0) / 100)
+    .toLocaleString('ru-RU')
+    .replace(/\u00a0/g, ' ');
+}
+
+function formatRoundedCoinUnits(units) {
+  const safeUnits = Number.isSafeInteger(units) ? units : 0;
+  return Math.floor((safeUnits + 50) / 100)
     .toLocaleString('ru-RU')
     .replace(/\u00a0/g, ' ');
 }
@@ -1454,7 +2145,7 @@ function sendToManager() {
   openView('workSent');
 }
 
-function sendHelpRequest() {
+async function sendHelpRequest() {
   const message = elements.helpRequestInput.value.trim();
 
   if (!message) {
@@ -1463,12 +2154,14 @@ function sendHelpRequest() {
     return;
   }
 
-  taskFlowState.helpRequests.push({
-    user: 'Илья Н.',
-    task: 'Подготовить основание стен для последующей обшивки ГКЛ.',
-    createdAt: new Date().toISOString(),
-    message,
+  if (!selectedTaskId) return showMessage('Сначала откройте задачу');
+  const response = await apiFetch(`/api/v1/worker/tasks/${selectedTaskId}/help`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ message }),
   });
+  const body = await readResponseBody(response);
+  if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось отправить сообщение');
   closeModal();
   showMessage('Сообщение отправлено руководителю.');
 }

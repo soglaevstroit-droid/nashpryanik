@@ -1,4 +1,4 @@
-import { TaskPriority, TaskStatus } from '@prisma/client';
+import { TaskAccessStatus, TaskPriority, TaskStatus } from '@prisma/client';
 
 export interface TaskRecord {
   id: string;
@@ -6,11 +6,20 @@ export interface TaskRecord {
   description: string | null;
   status: TaskStatus;
   priority: TaskPriority;
+  accessStatus: TaskAccessStatus;
+  position: number;
   creatorId: string;
   assigneeId: string | null;
   processId: string;
   objectId?: string | null;
   completedAt: Date | null;
+  deletedAt: Date | null;
+  deletedByUserId: string | null;
+  deletionReason: string | null;
+  creationOperationId: string | null;
+  isWorkBlocked: boolean;
+  workBlockedAt: Date | null;
+  workBlockedByUserId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

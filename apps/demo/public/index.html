@@ -79,8 +79,8 @@
               <strong id="approvedCoinAmount">0,00</strong>
             </div>
             <div>
-              <small>На согласовании</small>
-              <strong id="pendingCoinAmount">0,00</strong>
+              <small>Ожидание</small>
+              <strong id="pendingCoinAmount">0</strong>
             </div>
           </div>
           <button id="startWorkButton" class="startWorkButton" type="button" data-shift-action>
@@ -89,12 +89,12 @@
         </header>
 
         <section id="myWorkView" class="view is-active" data-smoke="04_Moya_Rabota">
-          <div class="sectionTitle"><h1>Мои задачи</h1></div>
+          <div class="sectionTitle"><h1 id="taskListHeading">Мои задачи</h1></div>
           <div id="workerObjectsList"><p>Загружаем задачи…</p></div>
         </section>
 
         <section id="historyView" class="view">
-          <div class="pageHead"><h1>История</h1></div>
+          <div class="pageHead"><h1 id="historyHeading">История</h1></div>
           <div id="historyList"><p>Загружаем историю…</p></div>
           <button id="historyMoreButton" class="secondaryButton" type="button" hidden>
             Показать ещё
@@ -103,7 +103,14 @@
 
         <section id="taskChoiceView" class="view" data-smoke="05_Vybor_Zadachi">
           <div class="pageHead">
-            <button type="button" class="iconOnly" data-back-to-tasks>‹</button>
+            <button
+              type="button"
+              class="iconOnly taskBackButton"
+              data-back-to-tasks
+              aria-label="Назад к задачам"
+            >
+              ‹
+            </button>
             <h1>Мои задачи</h1>
             <button type="button" class="iconOnly">☰</button>
           </div>
@@ -138,7 +145,14 @@
 
         <section id="taskDetailView" class="view" data-smoke="02_Otkrytaya_Zadacha">
           <div class="pageHead taskStatusHead">
-            <button type="button" class="iconOnly" data-back-to-tasks>‹</button>
+            <button
+              type="button"
+              class="iconOnly taskBackButton"
+              data-back-to-tasks
+              aria-label="Назад к задачам"
+            >
+              ‹
+            </button>
             <button class="taskStatusControl is-ready" type="button" data-task-status-control>
               <span>
                 <b data-task-status-text>Взять в работу</b>
@@ -147,18 +161,29 @@
               <i data-task-status-icon>▶</i>
             </button>
           </div>
-          <article class="taskHero taskTitleBlock">
-            <h2 id="taskTitle">Подготовить основание стен для последующей обшивки ГКЛ.</h2>
-            <p id="taskObject">Пряник / Этаж 3 / Пом. 314</p>
-            <span id="taskMeta" hidden>Взять в работу</span>
+          <article class="taskCard taskFeedCard taskWorkspaceCard taskTitleBlock">
+            <div class="taskFeedCardHeader">
+              <h2 id="taskTitle">Подготовить основание стен для последующей обшивки ГКЛ.</h2>
+            </div>
+            <div id="taskPhotos" class="detailPhotoGallery"></div>
+            <p id="taskObject" class="taskLocation">Пряник / Этаж 3 / Пом. 314</p>
+            <div class="taskProgressBlock">
+              <div class="taskProgressLine">
+                <span><i id="taskDetailProgressLine"></i></span
+                ><b id="taskDetailProgressPercent">0%</b>
+              </div>
+              <small id="taskDetailProgressCount">0 из 0 этапов выполнено</small>
+            </div>
+          </article>
+          <div hidden aria-hidden="true">
+            <span id="taskMeta"></span>
             <p id="taskDescription"></p>
             <p id="taskAssignee"></p>
-          </article>
-          <section id="taskPhotoSection" class="photoSection" data-smoke="photo_examples">
-            <div id="taskPhotos" class="detailPhotoGallery"></div>
-          </section>
+          </div>
           <section class="whiteCard stepTimelineCard">
+            <h2 class="stepWorkflowTitle">Этапы работ</h2>
             <div id="stepsList" class="stepTimeline"></div>
+            <div id="taskPauseInfo" class="stepWorkflowFooter" hidden></div>
           </section>
           <section class="whiteCard fileCard">
             <h3>Файлы</h3>
@@ -171,9 +196,11 @@
               <strong>Кабельные_линии_ЭОМ.pdf</strong>
             </article>
           </section>
-          <button class="helpButton" type="button" data-open-modal="helpRequest">
-            Нужна помощь?
-          </button>
+          <section id="taskHelpIsland" class="whiteCard taskHelpIsland">
+            <button class="helpButton" type="button" data-open-modal="helpRequest">
+              Нужна помощь?
+            </button>
+          </section>
         </section>
 
         <section id="currentStepView" class="view" data-smoke="10_Tekushchiy_Etap">
@@ -323,20 +350,40 @@
           </div>
         </section>
 
-        <nav class="bottomNav">
-          <button class="is-active" type="button" data-open-view="myWork">
+        <section id="messagesView" class="view">
+          <div class="pageHead"><h1>Сообщения</h1></div>
+          <div id="workerMessagesList" class="messageFeed"><p>Загружаем сообщения…</p></div>
+          <h2 class="subhead">Архив выполненных задач</h2>
+          <div id="workerArchiveList" class="messageFeed"><p>Загружаем архив…</p></div>
+        </section>
+
+        <section id="maintenanceView" class="view maintenanceView">
+          <article class="maintenanceIsland">
+            <div class="maintenanceIcon" aria-hidden="true">
+              <span>!</span>
+            </div>
+            <h1>Извините</h1>
+            <p>Идут технические работы</p>
+            <small>Этот раздел скоро будет доступен</small>
+            <button class="primaryButton" type="button" data-maintenance-back>Назад</button>
+          </article>
+        </section>
+
+        <nav class="bottomNav" aria-label="Основная навигация">
+          <button class="is-active" type="button" data-section="tasks" aria-current="page">
             <span class="navBriefcase" aria-hidden="true"></span><span>Задачи</span>
           </button>
-          <button type="button">
+          <button type="button" data-section="messages">
             <span class="navChat" aria-hidden="true"></span><span>Сообщения</span>
           </button>
-          <button type="button" aria-label="Заказать">
+          <button id="orderNavButton" type="button" data-section="order" aria-label="Заказать">
             <span class="navOrder" aria-hidden="true"></span>
+            <span id="orderNavLabel" class="orderNavLabel">Заказать</span>
           </button>
-          <button type="button" data-open-view="history">
+          <button id="historyNavButton" type="button" data-section="history">
             <span class="navArchive" aria-hidden="true"></span><span>История</span>
           </button>
-          <button type="button" data-open-modal="finishShift">
+          <button type="button" data-section="profile">
             <span class="navUser" aria-hidden="true"></span><span>Профиль</span>
           </button>
         </nav>
@@ -470,6 +517,89 @@
               Отправить сообщение
             </button>
           </div>
+        </section>
+
+        <section id="completeTaskModal" class="modalCard">
+          <h2>Все этапы выполнены</h2>
+          <p>Завершить задачу?</p>
+          <div class="taskStatusConfirmActions">
+            <button class="secondaryButton" type="button" data-cancel-complete-task>Нет</button>
+            <button class="primaryButton" type="button" data-confirm-complete-task>
+              Да, завершить
+            </button>
+          </div>
+        </section>
+
+        <section id="completeStepModal" class="modalCard">
+          <h2>Завершить этап?</h2>
+          <div class="taskStatusConfirmActions">
+            <button class="secondaryButton" type="button" data-cancel-complete-step>Нет</button>
+            <button class="primaryButton" type="button" data-confirm-complete-step>
+              Да, завершить
+            </button>
+          </div>
+        </section>
+
+        <section id="taskCompletedModal" class="modalCard taskCompletedModal">
+          <div class="modalIcon success" aria-hidden="true">✓</div>
+          <h2>Задача выполнена!</h2>
+          <p>Спасибо за качественную работу.</p>
+          <button class="primaryButton" type="button" data-finish-complete-task>
+            К списку задач
+          </button>
+        </section>
+
+        <section id="managerTaskModal" class="modalCard managerTaskModal">
+          <form id="managerTaskForm">
+            <div class="managerFormHead">
+              <h2>Поставить задачу</h2>
+              <button type="button" class="iconOnly" data-close-manager-form aria-label="Закрыть">
+                ×
+              </button>
+            </div>
+            <label>Объект<select id="managerObject" required></select></label>
+            <label>Место<input id="managerLocation" required /></label>
+            <label
+              >Название<input id="managerTitle" minlength="3" maxlength="160" required
+            /></label>
+            <label>Описание<textarea id="managerDescription"></textarea></label>
+            <label
+              >Фото<input id="managerPhotos" type="file" accept="image/jpeg,image/webp" multiple
+            /></label>
+            <div id="managerPhotoPreview" class="managerPhotoPreview"></div>
+            <div class="managerFormSection">
+              <div class="managerFormHead">
+                <h3>Этапы</h3>
+                <button type="button" class="secondaryButton" data-add-manager-step>
+                  Добавить этап
+                </button>
+              </div>
+              <div id="managerSteps"></div>
+            </div>
+            <fieldset>
+              <legend>Приоритет</legend>
+              <label
+                ><input type="radio" name="managerPriority" value="NORMAL" checked /> Обычная</label
+              ><label><input type="radio" name="managerPriority" value="URGENT" /> Срочная</label>
+            </fieldset>
+            <fieldset>
+              <legend>Доступ</legend>
+              <label
+                ><input type="radio" name="managerAccess" value="OPEN" checked /> Открытая</label
+              ><label><input type="radio" name="managerAccess" value="CLOSED" /> Закрытая</label>
+            </fieldset>
+            <label>Исполнитель<select id="managerWorker" required></select></label>
+            <label
+              >Номер задачи<input
+                id="managerPosition"
+                type="number"
+                min="1"
+                step="1"
+                value="1"
+                required
+            /></label>
+            <button class="primaryButton" type="submit">Поставить задачу</button>
+          </form>
         </section>
       </div>
 

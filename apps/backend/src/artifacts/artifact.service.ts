@@ -53,8 +53,20 @@ export class ArtifactService {
   ): Promise<ArtifactRecord> {
     assertAuthUser(user);
     assertUploadPhotoDto(dto);
-    if (dto.taskId || dto.taskStepId) await this.activeShiftAccess?.assertActiveShift(user);
+    if (user.role === 'WORKER' && (dto.taskId || dto.taskStepId))
+      await this.activeShiftAccess?.assertActiveShift(user);
     await this.assertUploadContext(user, dto);
+    if (dto.operationId && this.database) {
+      const existingEvent = await this.database.event.findUnique({
+        where: { idempotencyKey: `photo:${user.id}:${dto.operationId}` },
+      });
+      if (existingEvent) {
+        const existing = await this.database.artifact.findFirst({
+          where: { eventId: existingEvent.id },
+        });
+        if (existing) return existing;
+      }
+    }
     const uploaded = await this.uploadPhotoObject(user, file);
 
     try {
@@ -121,6 +133,7 @@ export class ArtifactService {
         taskId: dto.taskId ?? null,
         taskStepId: dto.taskStepId ?? null,
         workShiftId: options.workShiftId ?? null,
+        idempotencyKey: dto.operationId ? `photo:${user.id}:${dto.operationId}` : undefined,
         payload: {
           artifactType: 'PHOTO',
           taskId: dto.taskId ?? null,
@@ -189,7 +202,26 @@ export class ArtifactService {
 
   async deletePhoto(userOrId: AuthUser | string, id?: string): Promise<ArtifactRecord> {
     const artifact = await this.getArtifactRecord(typeof userOrId === 'string' ? userOrId : id!);
-    if (typeof userOrId !== 'string') await this.assertCanAccess(userOrId, artifact);
+    if (typeof userOrId !== 'string') {
+      await this.assertCanAccess(userOrId, artifact);
+      if (userOrId.role === 'WORKER') {
+        await this.activeShiftAccess?.assertActiveShift(userOrId);
+        if (!artifact.taskStepId || !this.database)
+          throw new BadRequestException('Only current step photos can be deleted');
+        const step = await this.database.taskStep.findUnique({
+          where: { id: artifact.taskStepId },
+          include: { task: true },
+        });
+        if (
+          !step ||
+          step.status !== 'IN_PROGRESS' ||
+          step.task.status !== 'IN_PROGRESS' ||
+          step.task.isWorkBlocked ||
+          step.task.deletedAt
+        )
+          throw new BadRequestException('Photo can no longer be deleted');
+      }
+    }
 
     await this.storage.deleteObject(artifact.storageKey);
 
@@ -210,22 +242,26 @@ export class ArtifactService {
 
   private async assertUploadContext(user: AuthUser, dto: UploadPhotoDto): Promise<void> {
     if (user.role !== 'WORKER' || !this.database) return;
-    const taskId =
-      dto.taskId ??
-      (dto.taskStepId
-        ? (
-            await this.database.taskStep.findUnique({
-              where: { id: dto.taskStepId },
-              select: { taskId: true },
-            })
-          )?.taskId
-        : null);
-    if (!taskId) return;
-    const task = await this.database.task.findUnique({
-      where: { id: taskId },
-      select: { assigneeId: true },
+    if (!dto.taskStepId) throw new BadRequestException('Task step is required for worker photo');
+    const step = await this.database.taskStep.findUnique({
+      where: { id: dto.taskStepId },
+      include: {
+        task: { include: { steps: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } } },
+      },
     });
-    if (task?.assigneeId !== user.id) throw new NotFoundException('Task not found');
+    if (!step || step.task.assigneeId !== user.id || step.task.deletedAt)
+      throw new NotFoundException('Task not found');
+    if (dto.taskId && dto.taskId !== step.taskId)
+      throw new BadRequestException('Task step does not belong to task');
+    if (
+      step.task.status !== 'IN_PROGRESS' ||
+      step.task.isWorkBlocked ||
+      step.status !== 'IN_PROGRESS'
+    )
+      throw new BadRequestException('Photos can be added only to the active step');
+    const active = step.task.steps.filter((candidate) => candidate.status === 'IN_PROGRESS');
+    if (active.length !== 1 || active[0].id !== step.id)
+      throw new BadRequestException('Another task step is active');
   }
 
   private async getArtifactRecord(id: string): Promise<ArtifactRecord> {
@@ -258,6 +294,7 @@ function assertUploadPhotoDto(dto: UploadPhotoDto): void {
 
   assertNullableString(dto.taskId, 'taskId');
   assertNullableString(dto.taskStepId, 'taskStepId');
+  assertNullableString(dto.operationId, 'operationId');
 }
 
 function inspectPhotoFile(file: UploadedArtifactFile): PhotoInspection {

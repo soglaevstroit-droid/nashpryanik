@@ -47,8 +47,12 @@ export class TaskStepController {
 
   @Patch('api/v1/task-steps/:id/complete')
   @Roles(...workerStepRoles)
-  completeStep(@CurrentUser() user: AuthUser, @Param('id') id: string): Promise<TaskStepRecord> {
-    return this.steps.completeStep(user, id);
+  completeStep(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body('operationId') operationId?: string,
+  ): Promise<TaskStepRecord> {
+    return this.steps.completeStep(user, id, operationId);
   }
 
   @Patch('api/v1/task-steps/:id/reopen')

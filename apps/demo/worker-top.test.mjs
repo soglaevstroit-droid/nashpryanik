@@ -45,7 +45,8 @@ test('preview confirmation spans the full row and duplicate submission is guarde
 
 test('worker header renders three equal financial columns', () => {
   assert.match(styles, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
-  assert.match(html, /На согласовании/);
+  assert.doesNotMatch(html, /На согласовании/);
+  assert.match(html, /Ожидание/);
   assert.match(html, /approvedCoinAmount/);
   assert.match(html, /pendingCoinAmount/);
 });
@@ -63,8 +64,11 @@ test('closed shift resets earned to 0,00 and uses human status labels', () => {
   assert.match(app, /status === 'ACTIVE' \? 'Работает' : 'Отдыхает'/);
 });
 
-test('pending keeps cents while top balance uses approved whole coins', () => {
-  assert.match(app, /pendingCoinAmount\.textContent = formatCoinUnits\(pending\)/);
+test('pending is rounded for display while top balance uses approved whole coins', () => {
+  assert.match(app, /pendingCoinAmount\.textContent = formatRoundedCoinUnits\(pending\)/);
+  assert.match(app, /Math\.floor\(\(safeUnits \+ 50\) \/ 100\)/);
+  assert.equal(Math.floor((12542 + 50) / 100), 125);
+  assert.equal(Math.floor((12550 + 50) / 100), 126);
   assert.match(app, /totalCoinBalance\.textContent = formatApprovedCoinUnits\(approved\)/);
   assert.match(app, /approvedBalanceCoinUnits/);
 });

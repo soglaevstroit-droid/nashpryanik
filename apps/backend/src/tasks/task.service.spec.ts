@@ -28,10 +28,19 @@ function createTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     description: null,
     status: 'CREATED',
     priority: 'NORMAL',
+    accessStatus: 'OPEN',
+    position: 1,
     creatorId: manager.id,
     assigneeId: null,
     processId: 'process-1',
     completedAt: null,
+    deletedAt: null,
+    deletedByUserId: null,
+    deletionReason: null,
+    creationOperationId: null,
+    isWorkBlocked: false,
+    workBlockedAt: null,
+    workBlockedByUserId: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -360,4 +369,51 @@ test('worker task actions require an active shift before reading the task', asyn
 
   await assert.rejects(service.acceptTask(worker, 'task-1'), /ACTIVE_SHIFT_REQUIRED/);
   assert.equal(taskRead, false);
+});
+
+test('confirmed task completion is transactional and idempotent', async () => {
+  let task = createTask({ status: 'IN_PROGRESS', assigneeId: worker.id });
+  let completionEvent: { idempotencyKey?: string } | null = null;
+  let processStatus = 'ACTIVE';
+  const client = {
+    event: { findUnique: async () => completionEvent },
+    task: {
+      findFirst: async () => task,
+      update: async ({ data }: { data: Partial<TaskRecord> }) => (
+        (task = { ...task, ...data }),
+        task
+      ),
+    },
+    taskStep: { count: async () => 0 },
+    process: {
+      update: async ({ data }: { data: { status: string } }) => ((processStatus = data.status), {}),
+    },
+  };
+  const database = {
+    event: { findUnique: async () => completionEvent },
+    task: { findFirst: async () => task },
+    user: { findUnique: async () => ({ name: 'Илья Н.' }) },
+    constructionObject: { findUnique: async () => ({ name: 'Пряник' }) },
+    $transaction: async (action: (value: typeof client) => unknown) => action(client),
+  };
+  const eventTypes: string[] = [];
+  const events = {
+    createEvent: async (dto: { type: string; idempotencyKey?: string }) => {
+      eventTypes.push(dto.type);
+      completionEvent = { idempotencyKey: dto.idempotencyKey };
+      return { id: 'event-complete' };
+    },
+  };
+  const service = new TaskService(
+    createRepository([task]),
+    events as never,
+    createProcessService([]),
+    database as never,
+    { assertActiveShift: async () => undefined } as never,
+  );
+  await service.completeTask(worker, task.id, 'task-operation-1');
+  await service.completeTask(worker, task.id, 'task-operation-1');
+  assert.equal(task.status, 'COMPLETED');
+  assert.equal(processStatus, 'COMPLETED');
+  assert.deepEqual(eventTypes, ['TASK_COMPLETED']);
 });

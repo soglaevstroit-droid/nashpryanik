@@ -104,6 +104,30 @@ export class TaskService {
         client,
         snapshot,
       );
+      const firstStep = await client?.taskStep.findFirst({
+        where: { taskId: task.id, status: { in: ['CREATED', 'REOPENED'] } },
+        orderBy: { order: 'asc' },
+      });
+      if (firstStep && client) {
+        const startedStep = await client.taskStep.update({
+          where: { id: firstStep.id },
+          data: { status: 'IN_PROGRESS', startedAt: new Date() },
+        });
+        await this.events.createEvent(
+          {
+            type: 'STEP_STARTED',
+            actorId: user.id,
+            entityType: 'task_step',
+            entityId: startedStep.id,
+            objectId: task.objectId,
+            taskId: task.id,
+            taskStepId: startedStep.id,
+            payload: { action: 'STEP_STARTED', order: startedStep.order },
+            metadata: { ...snapshot, stepTitle: startedStep.title },
+          },
+          client,
+        );
+      }
       return updated;
     });
   }
@@ -117,16 +141,84 @@ export class TaskService {
     return updated;
   }
 
-  async completeTask(user: AuthUser, id: string): Promise<TaskRecord> {
+  async completeTask(
+    user: AuthUser,
+    id: string,
+    requestedOperationId?: string,
+  ): Promise<TaskRecord> {
+    const requestedKey = requestedOperationId?.trim();
+    if (this.database && requestedKey) {
+      assertAuthUser(user);
+      await this.activeShiftAccess?.assertActiveShift(user);
+      const duplicate = await this.database.event.findUnique({
+        where: { idempotencyKey: `task:complete:${requestedKey}` },
+      });
+      if (duplicate) {
+        const existing = await this.database.task.findFirst({
+          where: { id, assigneeId: user.id, deletedAt: null },
+        });
+        if (!existing) throw new NotFoundException('Task not found');
+        return existing;
+      }
+    }
     const task = await this.prepareWorkerTransition(
       user,
       id,
       ['IN_PROGRESS', 'ON_REVIEW'],
       'complete',
     );
-    const incompleteSteps = this.database ? await this.repository.countIncompleteSteps(task.id) : 0;
-    if (incompleteSteps > 0) throw new BadRequestException('Complete all task steps first');
     const snapshot = await this.eventSnapshot(user, task);
+    if (this.database) {
+      const operationId = requestedOperationId?.trim();
+      if (!operationId || operationId.length > 120)
+        throw new BadRequestException('operationId is required');
+      return this.database.$transaction(async (client) => {
+        const idempotencyKey = `task:complete:${operationId}`;
+        const duplicate = await client.event.findUnique({ where: { idempotencyKey } });
+        if (duplicate) {
+          const existing = await client.task.findFirst({ where: { id: task.id, deletedAt: null } });
+          if (!existing) throw new NotFoundException('Task not found');
+          return existing;
+        }
+        const current = await client.task.findFirst({ where: { id: task.id, deletedAt: null } });
+        if (!current || current.assigneeId !== user.id)
+          throw new NotFoundException('Task not found');
+        if (current.status !== 'IN_PROGRESS' && current.status !== 'ON_REVIEW')
+          throw new BadRequestException('Task cannot be completed now');
+        if (current.isWorkBlocked || current.accessStatus === 'CLOSED')
+          throw new BadRequestException('Работа по задаче заблокирована');
+        const incompleteSteps = await client.taskStep.count({
+          where: { taskId: task.id, status: { not: 'COMPLETED' } },
+        });
+        if (incompleteSteps > 0) throw new BadRequestException('Complete all task steps first');
+        const completedAt = new Date();
+        const result = await client.task.update({
+          where: { id: task.id },
+          data: { status: 'COMPLETED', completedAt },
+        });
+        await client.process.update({
+          where: { id: result.processId },
+          data: { status: 'COMPLETED', finishedAt: completedAt },
+        });
+        await this.events.createEvent(
+          {
+            type: 'TASK_COMPLETED',
+            actorId: user.id,
+            entityType: 'task',
+            entityId: result.id,
+            objectId: result.objectId,
+            taskId: result.id,
+            idempotencyKey,
+            payload: { action: 'TASK_COMPLETED', status: result.status },
+            metadata: snapshot as Prisma.InputJsonObject,
+          },
+          client,
+        );
+        return result;
+      });
+    }
+    const incompleteSteps = 0;
+    if (incompleteSteps > 0) throw new BadRequestException('Complete all task steps first');
     const updated = await this.transaction(async (client) => {
       const result = await this.repository.update(
         task.id,
@@ -202,7 +294,7 @@ export class TaskService {
 
     const task = await this.getTask(id);
     this.assertTransition(task, allowed, action);
-    this.assertWorkerCanAct(user, task);
+    await this.assertWorkerCanAct(user, task);
 
     return task;
   }
@@ -213,13 +305,39 @@ export class TaskService {
     }
   }
 
-  private assertWorkerCanAct(user: AuthUser, task: TaskRecord): void {
+  private async assertWorkerCanAct(user: AuthUser, task: TaskRecord): Promise<void> {
     if (user.role !== 'WORKER' || !task.assigneeId) {
       return;
     }
 
     if (task.assigneeId !== user.id) {
       throw new BadRequestException('Worker can act only on assigned task');
+    }
+    if (task.accessStatus === 'CLOSED') {
+      throw new BadRequestException('TASK_ACCESS_CLOSED');
+    }
+    if (task.isWorkBlocked || task.deletedAt) {
+      throw new BadRequestException('Работа по задаче заблокирована');
+    }
+    if (!this.database) return;
+    const active = await this.database.task.findFirst({
+      where: { assigneeId: user.id, status: 'IN_PROGRESS', deletedAt: null },
+      select: { id: true },
+    });
+    if (active && active.id !== task.id) throw new BadRequestException('ANOTHER_TASK_IS_ACTIVE');
+    if (!active) {
+      const urgent = await this.database.task.findFirst({
+        where: {
+          assigneeId: user.id,
+          priority: 'URGENT',
+          accessStatus: 'OPEN',
+          deletedAt: null,
+          status: { notIn: ['COMPLETED', 'CANCELLED'] },
+        },
+        orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+        select: { id: true },
+      });
+      if (urgent && urgent.id !== task.id) throw new BadRequestException('URGENT_TASK_REQUIRED');
     }
   }
 

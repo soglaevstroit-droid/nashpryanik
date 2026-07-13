@@ -11,14 +11,34 @@ test('returns active objects with only current worker tasks grouped', async () =
       findMany: async (query: { include: { tasks: { where: unknown } } }) => {
         where = query.include.tasks.where;
         return [
-          { id: 'object-1', name: 'Пряник', sortOrder: 1, tasks: [{ id: 'task-1', steps: [] }] },
+          {
+            id: 'object-1',
+            name: 'Пряник',
+            sortOrder: 1,
+            tasks: [
+              {
+                id: 'task-1',
+                steps: [],
+                status: 'ASSIGNED',
+                priority: 'NORMAL',
+                accessStatus: 'OPEN',
+                position: 1,
+                createdAt: new Date(),
+              },
+            ],
+          },
         ];
       },
     },
     artifact: { findMany: async () => [{ id: 'photo-1', taskId: 'task-1' }] },
+    workShift: { findFirst: async () => ({ id: 'shift-1' }) },
   };
   const result = await new WorkerService(database as never).getObjectsWithTasks(worker);
-  assert.deepEqual(where, { assigneeId: worker.id, status: { notIn: ['COMPLETED', 'CANCELLED'] } });
+  assert.deepEqual(where, {
+    assigneeId: worker.id,
+    deletedAt: null,
+    status: { notIn: ['COMPLETED', 'CANCELLED'] },
+  });
   assert.equal(result[0].activeTasksCount, 1);
   assert.equal(result[0].object.name, 'Пряник');
   assert.equal(result[0].tasks[0].photos[0].id, 'photo-1');
@@ -33,6 +53,7 @@ test('inactive objects are excluded by database query', async () => {
         return [];
       },
     },
+    workShift: { findFirst: async () => null },
   };
   const result = await new WorkerService(database as never).getObjectsWithTasks(worker);
   assert.deepEqual(activeFilter, { isActive: true });
@@ -49,11 +70,13 @@ test('task details belong to the selected worker task and steps keep their order
           id: 'task-2',
           title: 'Вторая задача',
           assigneeId: worker.id,
+          accessStatus: 'OPEN',
           object: { id: 'object-1', name: 'Пряник' },
           steps: [
             { id: 'step-1', order: 1, title: 'Первый этап' },
             { id: 'step-2', order: 2, title: 'Второй этап' },
           ],
+          messages: [],
         };
       },
     },
@@ -63,10 +86,13 @@ test('task details belong to the selected worker task and steps keep their order
         { id: 'step-photo', taskStepId: 'step-2' },
       ],
     },
-    user: { findUnique: async () => ({ id: worker.id, name: 'Илья' }) },
+    user: {
+      findUnique: async () => ({ id: worker.id, name: 'Илья' }),
+      findMany: async () => [],
+    },
   };
   const result = await new WorkerService(database as never).getTask(worker, 'task-2');
-  assert.deepEqual(taskWhere, { id: 'task-2', assigneeId: worker.id });
+  assert.deepEqual(taskWhere, { assigneeId: worker.id, status: 'IN_PROGRESS', deletedAt: null });
   assert.equal(result.title, 'Вторая задача');
   assert.deepEqual(
     result.steps.map((step) => step.title),

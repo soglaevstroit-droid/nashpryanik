@@ -7,9 +7,11 @@ import { DatabaseModule } from './database/database.module.js';
 import { EventModule } from './events/event.module.js';
 import { HealthModule } from './health/health.module.js';
 import { LoggerModule } from './logger/logger.module.js';
+import { ManagerTaskModule } from './manager/manager-task.module.js';
 import { ProcessModule } from './processes/process.module.js';
 import { RolesModule } from './roles/roles.module.js';
 import { TaskStepModule } from './task-steps/task-step.module.js';
+import { TaskMessageModule } from './task-messages/task-message.module.js';
 import { TaskModule } from './tasks/task.module.js';
 import { UserModule } from './users/user.module.js';
 import { WorkspaceModule } from './workspace/workspace.module.js';
@@ -20,6 +22,7 @@ import { WorkerModule } from './worker/worker.module.js';
   imports: [
     AppConfigModule,
     LoggerModule,
+    ManagerTaskModule,
     CommonModule,
     DatabaseModule,
     HealthModule,
@@ -30,6 +33,7 @@ import { WorkerModule } from './worker/worker.module.js';
     AuthModule,
     WorkShiftModule,
     TaskModule,
+    TaskMessageModule,
     TaskStepModule,
     ArtifactModule,
     WorkspaceModule,

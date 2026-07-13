@@ -32,22 +32,23 @@ export class TaskRepository {
   }
 
   findById(id: string, client: Prisma.TransactionClient = this.prisma): Promise<TaskRecord | null> {
-    return client.task.findUnique({
-      where: { id },
+    return client.task.findFirst({
+      where: { id, deletedAt: null },
     });
   }
 
   findMany(limit: number): Promise<TaskRecord[]> {
     return this.prisma.task.findMany({
-      orderBy: { createdAt: 'desc' },
+      where: { deletedAt: null },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
       take: limit,
     });
   }
 
   findManyByAssigneeId(assigneeId: string, limit: number): Promise<TaskRecord[]> {
     return this.prisma.task.findMany({
-      where: { assigneeId },
-      orderBy: { createdAt: 'desc' },
+      where: { assigneeId, deletedAt: null },
+      orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
       take: limit,
     });
   }

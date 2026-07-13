@@ -75,6 +75,7 @@ async function seedReviewUsers(): Promise<void> {
   for (const user of [
     { email: 'finance', name: 'Локальный финансист', role: Role.FINANCE },
     { email: 'analyst', name: 'Локальный аналитик', role: Role.ANALYST },
+    { email: 'manager', name: 'Иван Р.', role: Role.FOREMAN },
   ]) {
     await database.user.upsert({
       where: { email: user.email },
@@ -176,16 +177,16 @@ async function seedWorkerDemo(workerId: string, actorName: string): Promise<void
     });
     for (let order = 1; order <= stepsCount; order += 1) {
       const stepId = `demo-step-${id}-${order}`;
-      const isCompletedDemoStep =
-        (id.endsWith('1') && order === 2) || (id.endsWith('4') && order === 1);
+      const isCompletedDemoStep = id.endsWith('4') && order === 1;
+      const isActiveDemoStep = id.endsWith('4') && order === 2;
       await database.taskStep.upsert({
         where: { id: stepId },
         update: {
           title: demoStepTitle(id, order),
           description: demoStepDescription(id, order),
           order,
-          status: isCompletedDemoStep ? 'COMPLETED' : 'CREATED',
-          startedAt: isCompletedDemoStep ? new Date() : null,
+          status: isCompletedDemoStep ? 'COMPLETED' : isActiveDemoStep ? 'IN_PROGRESS' : 'CREATED',
+          startedAt: isCompletedDemoStep || isActiveDemoStep ? new Date() : null,
           completedAt: isCompletedDemoStep ? new Date() : null,
         },
         create: {
@@ -194,8 +195,8 @@ async function seedWorkerDemo(workerId: string, actorName: string): Promise<void
           title: demoStepTitle(id, order),
           description: demoStepDescription(id, order),
           order,
-          status: isCompletedDemoStep ? 'COMPLETED' : 'CREATED',
-          startedAt: isCompletedDemoStep ? new Date() : null,
+          status: isCompletedDemoStep ? 'COMPLETED' : isActiveDemoStep ? 'IN_PROGRESS' : 'CREATED',
+          startedAt: isCompletedDemoStep || isActiveDemoStep ? new Date() : null,
           completedAt: isCompletedDemoStep ? new Date() : null,
         },
       });
@@ -261,7 +262,8 @@ async function seedPhotoSliderDemoData(workerId: string): Promise<void> {
   ];
   const assetFiles = [];
   for (const fileName of assets) {
-    const buffer = await readFile(resolve(process.cwd(), '../demo/public/assets', fileName));
+    const demoRoot = process.cwd().endsWith('apps/backend') ? '../demo' : 'apps/demo';
+    const buffer = await readFile(resolve(process.cwd(), demoRoot, 'public/assets', fileName));
     const storageKey = `demo/photo-slider/${fileName}`;
     await artifactStorage.uploadPhoto(storageKey, {
       buffer,

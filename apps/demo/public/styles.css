@@ -1943,6 +1943,90 @@ body.is-photo-viewer-open {
   box-shadow: 0 12px 20px rgb(125 127 141 / 22%);
 }
 
+.taskWorkspaceCard,
+.stepTimelineCard,
+.fileCard,
+.taskHelpIsland {
+  margin-bottom: 18px;
+}
+
+.taskWorkspaceCard {
+  padding: 16px;
+}
+
+.taskWorkspaceCard h2 {
+  font-size: clamp(19px, calc(4.6vw + 2px), 20px);
+  line-height: 1.3;
+}
+
+.stepWorkActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.stepWorkActions button {
+  min-height: 52px;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 800;
+}
+
+.stepWorkActions button:last-child {
+  background: var(--green);
+}
+
+.taskPauseInfo {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+}
+
+.taskPauseInfo p,
+.taskPauseInfo small,
+.taskPauseInfo time,
+.taskHelpIsland p {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.taskHelpIsland {
+  padding: 0;
+  overflow: hidden;
+}
+
+.taskHelpIsland .helpButton {
+  min-height: 64px;
+  margin: 0;
+  border-radius: inherit;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: none;
+  font-size: 16px;
+  text-align: center;
+}
+
+.messageFeed {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.messageCard {
+  padding: 16px;
+}
+
+.messageCard p,
+.messageCard small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
 .fileItem {
   display: grid;
   grid-template-columns: 48px 1fr;
@@ -2106,8 +2190,489 @@ body.is-photo-viewer-open {
   font-weight: 650;
 }
 
+.managerTaskModal {
+  width: min(100%, 520px);
+  max-height: calc(100dvh - 40px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  text-align: left;
+}
+
+.managerTaskModal form,
+.managerTaskModal label,
+.managerFormSection,
+.managerStepFields {
+  display: grid;
+  gap: 8px;
+}
+
+.managerTaskModal form {
+  gap: 16px;
+}
+.managerTaskModal input,
+.managerTaskModal select,
+.managerTaskModal textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  font: inherit;
+}
+.managerTaskModal textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+.managerFormHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.managerStepFields {
+  margin-bottom: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--page-bg, #f4f2ef);
+}
+.managerPhotoPreview {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+.managerPhotoPreview img {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  object-fit: cover;
+}
+.managerControls {
+  display: grid;
+  gap: 12px;
+}
+.managerControls label {
+  display: grid;
+  gap: 6px;
+}
+.dangerButton {
+  width: 100%;
+  color: #b42318;
+  border: 1px solid #f0b4ad;
+  background: #fff5f3;
+}
+.manager-mode .workerDivider,
+.manager-mode .workerStats,
+.manager-mode .startWorkButton {
+  display: none;
+}
+
+/* Worker task workflow: one vertical, backend-driven path. */
+.stepWorkflowTitle {
+  margin: 0 0 22px;
+  color: var(--text);
+  font-size: clamp(20px, 6vw, 24px);
+  line-height: 1.2;
+}
+
+.stepTimeline {
+  --workflow-orange: var(--accent);
+  --workflow-green: #48a447;
+  --workflow-line: #d7d9dc;
+  display: grid;
+  gap: 0;
+}
+
+.stepTimeline article,
+.stepTimeline article.stepTimelineFuture {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 10px;
+  min-height: 0;
+  padding: 0 0 38px;
+  text-align: center;
+}
+
+.stepTimeline article::before {
+  content: none;
+}
+.stepTimeline article:not(:last-child)::after {
+  position: absolute;
+  top: calc(100% - 34px);
+  bottom: 4px;
+  left: 50%;
+  width: 2px;
+  height: auto;
+  content: '';
+  background: var(--workflow-line);
+  transform: translateX(-50%);
+}
+
+.stepIndicator {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  place-items: center;
+  border-radius: 50%;
+  background: #c9ccd0;
+  color: #202124;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.stepIndicator.is-active {
+  background: var(--workflow-orange);
+  color: #fff;
+}
+.stepIndicator.is-complete {
+  background: var(--workflow-green);
+  color: #fff;
+  font-size: 18px;
+}
+
+.stepTimelineFuture > div {
+  width: min(100%, 360px);
+  min-width: 0;
+}
+.stepTimelineFuture h3,
+.currentStepBubble h3 {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+.stepTimelineFuture p,
+.currentStepBubble > p {
+  margin: 0 auto;
+  max-width: 34ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.stepTimelineFuture em {
+  min-width: 0;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #f0f1f2;
+  color: #686b70;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 650;
+}
+.stepTimelineFuture.is-complete em {
+  background: #edf8ec;
+  color: #358337;
+}
+.stepTimelineFuture .photoSlider {
+  margin-top: 12px;
+  text-align: left;
+}
+
+.stepTimelineCurrent {
+  padding-bottom: 38px;
+}
+.currentStepBubble {
+  width: min(100%, 420px);
+  padding: 18px 14px 16px;
+  border: 1px solid rgb(240 122 0 / 9%);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fff9f1, #fff6e9);
+  box-shadow: 0 10px 28px rgb(98 64 24 / 7%);
+}
+.currentStepBubble::before {
+  content: none;
+}
+.currentStepBubble .photoSlider {
+  margin-top: 14px;
+  text-align: left;
+}
+.stepPhotoManage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.currentStepBubble .stepPhotoManage button {
+  width: auto;
+  min-height: 34px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid #e0e1e2;
+  border-radius: 9px;
+  background: #fff;
+  color: #8b3430;
+  font-size: 11px;
+  font-weight: 650;
+  box-shadow: none;
+}
+
+.stepWorkActions {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.currentStepBubble .stepWorkActions button {
+  min-height: 48px;
+  margin: 0;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 750;
+  box-shadow: none;
+}
+.currentStepBubble .stepPhotoButton {
+  border: 1.5px solid var(--workflow-orange);
+  background: #fff;
+  color: var(--text);
+}
+.currentStepBubble .stepCompleteButton {
+  border: 0;
+  background: linear-gradient(180deg, #ff9b16, #f27b00);
+  color: #fff;
+  box-shadow: 0 8px 18px rgb(240 122 0 / 18%);
+}
+.currentStepBubble .stepCompleteButton:disabled {
+  background: #e2e4e6;
+  color: #96999d;
+  box-shadow: none;
+}
+
+.stepPhotoWarning,
+.stepStateMessage,
+.stepFooterNotice,
+.stepBlockedState,
+.stepFinalState {
+  border-radius: 14px;
+  text-align: left;
+}
+.stepPhotoWarning {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  margin-top: 14px;
+  padding: 12px;
+  background: #fff0ef;
+  color: #d13d39;
+}
+.stepPhotoWarning span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  background: #ef7773;
+  color: #fff;
+  font-weight: 800;
+}
+.stepPhotoWarning p {
+  margin: 0;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.stepStateMessage {
+  margin: 14px 0 0;
+  padding: 13px;
+  background: #fff0ef;
+}
+.stepStateMessage.is-success {
+  background: #eaf7e9;
+  color: #2f7532;
+}
+.stepStateMessage.is-blocked {
+  background: #ffefed;
+  color: #a62c28;
+}
+.stepStateMessage strong,
+.stepStateMessage p,
+.stepStateMessage small,
+.stepStateMessage time {
+  display: block;
+  margin: 0 0 5px;
+  text-align: left;
+}
+.stepStateMessage p {
+  color: inherit;
+  font-size: 13px;
+}
+.stepStateMessage time {
+  margin: 8px 0 0;
+  color: #74777c;
+  font-size: 11px;
+}
+
+.stepStateBadge {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #ffe2df;
+  color: #c93430;
+  font-weight: 750;
+}
+.stepStateBadge.is-blocked {
+  background: #ffdcd8;
+}
+.stepWorkflowFooter {
+  margin-top: 2px;
+}
+.stepFooterNotice {
+  padding: 13px;
+  border: 1px solid #e6e7e8;
+  background: #f7f7f6;
+  color: #5f6267;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.stepFooterNotice.is-paused {
+  background: #fff0ef;
+  color: #c43d38;
+}
+.stepFooterNotice.is-success {
+  background: #edf8ec;
+  color: #37813a;
+}
+
+.stepBlockedState,
+.stepFinalState {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 22px 16px;
+  text-align: center;
+}
+.stepBlockedState {
+  background: #f2f2f1;
+}
+.stepFinalState {
+  background: linear-gradient(180deg, #eef9e9, #e4f4dc);
+}
+.stepBlockedState > span,
+.stepFinalState > span {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 50%;
+  background: #d4d5d5;
+  font-size: 22px;
+}
+.stepFinalState > span {
+  background: #48a447;
+}
+.stepBlockedState h3,
+.stepFinalState h3 {
+  margin: 2px 0 0;
+}
+.stepBlockedState p,
+.stepFinalState p,
+.stepFinalState time {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.stepBlockedState button,
+.stepFinalState button {
+  width: 100%;
+  min-height: 46px;
+  margin-top: 8px;
+  border: 1px solid #d5d7da;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepTimeline *,
+  .stepWorkflowFooter * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
 .bottomNav .is-active {
   color: var(--accent);
+}
+
+.bottomNav button.is-order-active .navOrder {
+  outline: 3px solid rgb(240 122 0 / 24%);
+  outline-offset: 3px;
+  box-shadow: 0 12px 28px rgb(255 107 0 / 38%);
+}
+
+.maintenanceView {
+  min-height: calc(100dvh - var(--bottom-nav-height) - 44px);
+  align-content: center;
+}
+
+.maintenanceView.is-active {
+  display: grid;
+}
+
+.maintenanceIsland {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: clamp(28px, 8vw, 42px) 22px 24px;
+  border-radius: var(--radius-large);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.maintenanceIcon {
+  position: relative;
+  display: grid;
+  width: 72px;
+  height: 62px;
+  place-items: end center;
+  margin-bottom: 4px;
+  border: 4px solid var(--accent);
+  border-radius: 36px 36px 18px 18px;
+  color: var(--accent);
+}
+
+.maintenanceIcon::before {
+  position: absolute;
+  top: -12px;
+  width: 38px;
+  height: 14px;
+  content: '';
+  border: 4px solid var(--accent);
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+}
+
+.maintenanceIcon span {
+  margin-bottom: 8px;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.maintenanceIsland h1 {
+  font-size: 26px;
+}
+
+.maintenanceIsland p {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.maintenanceIsland small {
+  color: var(--muted);
+}
+
+.maintenanceIsland .primaryButton {
+  margin-top: 12px;
 }
 
 .bottomNav button:nth-child(3) {
@@ -2321,10 +2886,32 @@ body.is-photo-viewer-open {
 
 .cameraCaptureBox video,
 .cameraCaptureBox img {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.cameraCaptureBox video {
+  z-index: 1;
+}
+
+.cameraCaptureBox #shiftCameraPreview {
+  z-index: 2;
+  display: block;
+  visibility: visible;
+  opacity: 1;
+  object-fit: contain;
+  background: #f5f5f3;
+  filter: none;
+}
+
+.cameraCaptureBox video[hidden],
+.cameraCaptureBox img[hidden],
+.cameraCaptureBox .cameraState[hidden] {
+  display: none !important;
 }
 
 .cameraCaptureBox video.is-front-camera {
@@ -2333,6 +2920,7 @@ body.is-photo-viewer-open {
 
 .cameraState {
   position: absolute;
+  z-index: 3;
   inset: 0;
   display: grid;
   place-items: center;
@@ -3101,5 +3689,177 @@ a:focus-visible {
     left: auto;
     width: var(--content-max-width);
     transform: translateX(50%);
+  }
+}
+
+@media (max-width: 360px) {
+  .stepTimeline article.stepTimelineFuture {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
+
+  .stepTimelineFuture:not(:last-child)::after {
+    left: 50%;
+  }
+}
+
+/* Corrected task workspace: simple islands and a compact work-step sequence. */
+#taskDetailView .taskStatusHead {
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 12px;
+}
+
+#taskDetailView .taskBackButton {
+  width: 104px;
+  height: 52px;
+  min-width: 104px;
+}
+
+#taskDetailView .taskStatusControl {
+  width: 100%;
+  min-width: 0;
+}
+
+.taskWorkspaceCard h2 {
+  display: -webkit-box;
+  overflow: hidden;
+  max-height: calc(1.25em * 2);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.stepTimeline {
+  display: grid;
+  gap: 0;
+}
+
+.stepTimeline .workStep,
+.stepTimeline .workStep.is-current {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 12px;
+  min-height: 0;
+  padding: 0;
+  text-align: center;
+}
+
+.stepTimeline .workStep::before,
+.stepTimeline .workStep::after {
+  content: none;
+}
+
+.workStepCompact {
+  width: 100%;
+  padding: 4px 8px;
+}
+
+.workStepCompact h3,
+.currentStepBubble h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.4;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.workStepCompact small {
+  display: block;
+  margin-top: 4px;
+  color: #438f43;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.workStepArrow {
+  display: block;
+  color: #92969c;
+  font-size: 22px;
+  font-weight: 400;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.stepTimeline .currentStepBubble {
+  width: 100%;
+  padding: 18px 14px 16px;
+  border: 1px solid rgb(240 122 0 / 10%);
+  border-radius: 16px;
+  background: #fff8ef;
+  box-shadow: 0 8px 22px rgb(76 49 18 / 6%);
+}
+
+.stepTimeline .currentStepBubble::before {
+  content: none;
+}
+
+.stepTimeline .currentStepBubble > p {
+  margin: 8px auto 0;
+  max-width: 42ch;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.stepTimeline .stepWorkActions {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.stepTimeline .stepWorkActions button {
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.stepTimeline .stepPhotoButton {
+  border: 1.5px solid var(--accent);
+  background: #fff;
+  color: var(--text);
+  box-shadow: none;
+}
+
+.stepTimeline .stepCompleteButton {
+  border: 0;
+  background: linear-gradient(180deg, #ff9912, #f27a00);
+  color: #fff;
+  box-shadow: 0 7px 16px rgb(240 122 0 / 17%);
+}
+
+.stepStoppedText {
+  margin-top: 12px !important;
+  padding: 11px;
+  border-radius: 10px;
+  background: #ffefed;
+  color: #b63b36 !important;
+  font-weight: 650;
+}
+
+.taskCompletedModal {
+  text-align: center;
+}
+
+@media (max-width: 360px) {
+  #taskDetailView .taskStatusHead {
+    grid-template-columns: 104px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  #taskDetailView .taskStatusControl {
+    padding-left: 10px;
+  }
+
+  #taskDetailView .taskStatusControl span {
+    margin-left: 0;
   }
 }

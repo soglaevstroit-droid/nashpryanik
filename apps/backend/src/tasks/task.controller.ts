@@ -72,8 +72,12 @@ export class TaskController {
 
   @Patch(':id/complete')
   @Roles(...workerTaskRoles)
-  completeTask(@CurrentUser() user: AuthUser, @Param('id') id: string): Promise<TaskRecord> {
-    return this.tasks.completeTask(user, id);
+  completeTask(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body('operationId') operationId?: string,
+  ): Promise<TaskRecord> {
+    return this.tasks.completeTask(user, id, operationId);
   }
 
   @Patch(':id/cancel')

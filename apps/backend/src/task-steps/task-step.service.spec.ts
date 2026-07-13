@@ -30,6 +30,9 @@ function createStep(overrides: Partial<TaskStepRecord> = {}): TaskStepRecord {
     order: 1,
     startedAt: null,
     completedAt: null,
+    completedByUserId: null,
+    minimumPhotoCount: 2,
+    completionOperationId: null,
     createdAt,
     updatedAt: createdAt,
     ...overrides,
@@ -108,10 +111,19 @@ function createTaskService(): TaskService {
       description: null,
       status: 'IN_PROGRESS',
       priority: 'NORMAL',
+      accessStatus: 'OPEN',
+      position: 1,
       creatorId: foreman.id,
       assigneeId: worker.id,
       processId: 'process-1',
       completedAt: null,
+      deletedAt: null,
+      deletedByUserId: null,
+      deletionReason: null,
+      creationOperationId: null,
+      isWorkBlocked: false,
+      workBlockedAt: null,
+      workBlockedByUserId: null,
       createdAt,
       updatedAt: createdAt,
     }),
@@ -251,4 +263,122 @@ test('worker step actions require an active shift before reading the step', asyn
 
   await assert.rejects(service.startStep(worker, 'step-1'), /ACTIVE_SHIFT_REQUIRED/);
   assert.equal(stepRead, false);
+});
+
+function createTransactionalStepService(options: {
+  photos: number;
+  blocked?: boolean;
+  last?: boolean;
+}) {
+  const eventTypes: string[] = [];
+  const first = {
+    ...createStep({ status: 'IN_PROGRESS', startedAt: createdAt }),
+    minimumPhotoCount: 2,
+  };
+  const second = { ...createStep({ id: 'step-2', order: 2 }), minimumPhotoCount: 2 };
+  const state = {
+    steps: options.last ? [first] : [first, second],
+    taskStatus: 'IN_PROGRESS',
+    processStatus: 'ACTIVE',
+  };
+  const task = {
+    id: 'task-1',
+    assigneeId: worker.id,
+    deletedAt: null,
+    status: 'IN_PROGRESS',
+    isWorkBlocked: options.blocked ?? false,
+    processId: 'process-1',
+    objectId: 'object-1',
+    title: 'Задача',
+    object: { name: 'Пряник' },
+    steps: state.steps,
+  };
+  const client = {
+    taskStep: {
+      findUnique: async ({ where }: { where: { id?: string; completionOperationId?: string } }) => {
+        if (where.completionOperationId)
+          return (
+            state.steps.find(
+              (step) => step.completionOperationId === where.completionOperationId,
+            ) ?? null
+          );
+        const step = state.steps.find((candidate) => candidate.id === where.id);
+        return step
+          ? { ...step, task: { ...task, status: state.taskStatus, steps: state.steps } }
+          : null;
+      },
+      update: async ({ where, data }: { where: { id: string }; data: Partial<TaskStepRecord> }) => {
+        const index = state.steps.findIndex((step) => step.id === where.id);
+        state.steps[index] = { ...state.steps[index], ...data };
+        return state.steps[index];
+      },
+    },
+    artifact: { count: async () => options.photos },
+    task: {
+      update: async ({ data }: { data: { status: string } }) => (
+        (state.taskStatus = data.status),
+        task
+      ),
+    },
+    process: {
+      update: async ({ data }: { data: { status: string } }) => (
+        (state.processStatus = data.status),
+        {}
+      ),
+    },
+  };
+  const database = {
+    $transaction: async (action: (value: typeof client) => unknown) => action(client),
+    task: { findUnique: async () => task },
+    user: { findUnique: async () => ({ name: 'Илья Н.' }) },
+  };
+  const service = new TaskStepService(
+    createRepository(state.steps),
+    createEventService(eventTypes),
+    createTaskService(),
+    database as never,
+    { assertActiveShift: async () => undefined } as never,
+  );
+  return { service, state, eventTypes };
+}
+
+test('backend rejects completion below step minimum photo count', async () => {
+  const { service, state } = createTransactionalStepService({ photos: 1 });
+  await assert.rejects(
+    service.completeStep(worker, 'step-1', 'operation-low-photos'),
+    /минимум 2 фотографии/,
+  );
+  assert.equal(state.steps[0].status, 'IN_PROGRESS');
+});
+
+test('exact minimum completes current step and activates next by order', async () => {
+  const { service, state, eventTypes } = createTransactionalStepService({ photos: 2 });
+  await service.completeStep(worker, 'step-1', 'operation-next');
+  assert.equal(state.steps[0].status, 'COMPLETED');
+  assert.equal(state.steps[1].status, 'IN_PROGRESS');
+  assert.deepEqual(eventTypes, ['STEP_COMPLETED', 'STEP_STARTED']);
+});
+
+test('last step completion waits for separate task confirmation', async () => {
+  const { service, state, eventTypes } = createTransactionalStepService({ photos: 3, last: true });
+  await service.completeStep(worker, 'step-1', 'operation-last');
+  assert.equal(state.steps[0].status, 'COMPLETED');
+  assert.equal(state.taskStatus, 'IN_PROGRESS');
+  assert.equal(state.processStatus, 'ACTIVE');
+  assert.deepEqual(eventTypes, ['STEP_COMPLETED']);
+});
+
+test('same completion operation id returns existing result without duplicate events', async () => {
+  const { service, eventTypes } = createTransactionalStepService({ photos: 2 });
+  await service.completeStep(worker, 'step-1', 'operation-repeat');
+  await service.completeStep(worker, 'step-1', 'operation-repeat');
+  assert.deepEqual(eventTypes, ['STEP_COMPLETED', 'STEP_STARTED']);
+});
+
+test('blocked task cannot complete its active step', async () => {
+  const { service } = createTransactionalStepService({ photos: 2, blocked: true });
+  await assert.rejects(
+    service.completeStep(worker, 'step-1', 'operation-blocked'),
+    /приостановлена/,
+  );
 });

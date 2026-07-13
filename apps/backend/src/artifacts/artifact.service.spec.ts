@@ -239,6 +239,44 @@ test('worker task photo requires an active shift before storing a file', async (
   assert.deepEqual(storageEvents, []);
 });
 
+test('repeated photo operation returns existing artifact without storing a duplicate', async () => {
+  const storageEvents: string[] = [];
+  const existing = createArtifact();
+  const database = {
+    taskStep: {
+      findUnique: async () => ({
+        id: 'step-1',
+        taskId: 'task-1',
+        status: 'IN_PROGRESS',
+        task: {
+          id: 'task-1',
+          assigneeId: user.id,
+          deletedAt: null,
+          status: 'IN_PROGRESS',
+          isWorkBlocked: false,
+          steps: [{ id: 'step-1', status: 'IN_PROGRESS' }],
+        },
+      }),
+    },
+    event: { findUnique: async () => ({ id: existing.eventId }) },
+    artifact: { findFirst: async () => existing },
+  };
+  const service = new ArtifactService(
+    createRepository([existing]),
+    createStorage(storageEvents),
+    createEventService([]),
+    database as never,
+    { assertActiveShift: async () => undefined } as never,
+  );
+  const result = await service.uploadPhoto(
+    user,
+    { taskId: 'task-1', taskStepId: 'step-1', operationId: 'same-photo' },
+    createFile(),
+  );
+  assert.equal(result.id, existing.id);
+  assert.deepEqual(storageEvents, []);
+});
+
 test('generates MinIO photo storage key', () => {
   const storage = new ArtifactStorageService(createConfigService());
   const storageKey = storage.generatePhotoStorageKey(user.id, 'progress.JPG');

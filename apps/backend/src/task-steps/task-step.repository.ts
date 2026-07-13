@@ -14,6 +14,8 @@ interface UpdateTaskStepData {
   status?: TaskStepStatus;
   startedAt?: Date | null;
   completedAt?: Date | null;
+  completedByUserId?: string | null;
+  completionOperationId?: string | null;
 }
 
 @Injectable()

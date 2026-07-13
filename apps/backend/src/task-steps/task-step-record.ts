@@ -9,6 +9,9 @@ export interface TaskStepRecord {
   order: number;
   startedAt: Date | null;
   completedAt: Date | null;
+  completedByUserId: string | null;
+  minimumPhotoCount: number;
+  completionOperationId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

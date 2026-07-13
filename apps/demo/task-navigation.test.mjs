@@ -86,20 +86,51 @@ test('one photo and empty photo lists use valid states', () => {
 
 test('step actions are enabled only for a started task and use backend state', () => {
   assert.match(app, /selectedTask\.status === 'IN_PROGRESS'/);
-  assert.match(app, /step\.status === 'CREATED' \|\| step\.status === 'REOPENED'/);
+  assert.match(app, /steps\.find\(\(candidate\) => candidate\.status !== 'COMPLETED'\)/);
+  assert.match(app, /currentStep\?\.id === step\.id/);
+  assert.match(app, /Загрузите минимум две фотографии, чтобы завершить этап/);
   assert.match(app, /api\/v1\/task-steps/);
 });
 
-test('the same PhotoSlider is used by task list, history, details and steps', () => {
+test('task workspace reuses the slider, camera, messages and archive APIs', () => {
+  assert.match(html, /taskWorkspaceCard/);
+  assert.match(app, /openShiftCamera\('TASK_STEP', stepId\)/);
+  assert.match(app, /api\/v1\/worker\/tasks\/\$\{selectedTaskId\}\/help/);
+  assert.match(app, /api\/v1\/worker\/messages/);
+  assert.match(app, /api\/v1\/worker\/archive/);
+  assert.match(app, /api\/v1\/manager\/messages/);
+  assert.match(app, /data-manager-reply/);
+  assert.match(app, /function calculateCompletionBonus\(\)/);
+});
+
+test('bottom navigation uses one maintenance screen and one active section', () => {
+  assert.match(html, /id="maintenanceView"/);
+  assert.match(html, /Извините/);
+  assert.match(html, /Идут технические работы/);
+  assert.match(html, /data-maintenance-back/);
+  assert.match(html, /data-section="messages"/);
+  assert.match(html, /data-section="order" aria-label="Заказать"/);
+  assert.match(html, /data-section="profile"/);
+  assert.match(app, /let currentSection = 'tasks'/);
+  assert.match(app, /function navigateSection\(section\)/);
+  assert.match(app, /function updateBottomNavigation\(\)/);
+  assert.match(app, /removeAttribute\('aria-current'\)/);
+  assert.match(app, /navigateSection\(previousWorkingSection \|\| 'tasks'\)/);
+});
+
+test('the same PhotoSlider is used by task list, history and task details only', () => {
   assert.match(app, /PhotoSlider\.render\(task\.photos/);
   assert.match(app, /PhotoSlider\.render\(event\.artifacts/);
   assert.match(app, /PhotoSlider\.render\(selectedTask\.photos/);
-  assert.match(app, /PhotoSlider\.render\(step\.photos/);
+  assert.doesNotMatch(app, /PhotoSlider\.render\(step\.photos/);
 });
 
 test('resting worker sees per-slide locks while the slider remains interactive', () => {
   assert.match(app, /function isTaskAccessLocked\(\)/);
-  assert.match(app, /locked: isTaskAccessLocked\(\)/);
+  assert.match(
+    app,
+    /locked: !isManager\(\) && \(isTaskAccessLocked\(\) \|\| task\.isAccessLocked\)/,
+  );
   assert.match(slider, /class="photoLockOverlay" aria-hidden="true"/);
   assert.match(slider, /fill="none" stroke="#FFFFFF"/);
   assert.match(slider, /setLocked\(root, locked\)/);

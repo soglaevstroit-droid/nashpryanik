@@ -9,6 +9,7 @@ import { CreateTaskStepDto } from './dto/create-task-step.dto.js';
 import { TaskStepRecord } from './task-step-record.js';
 import { TaskStepRepository } from './task-step.repository.js';
 import { ActiveShiftAccessService } from '../work-shifts/active-shift-access.service.js';
+import { randomUUID } from 'node:crypto';
 
 const defaultStepListLimit = 200;
 
@@ -66,19 +67,104 @@ export class TaskStepService {
     });
   }
 
-  async completeStep(user: AuthUser, id: string): Promise<TaskStepRecord> {
-    const step = await this.prepareTransition(user, id, ['IN_PROGRESS'], 'complete');
-    const snapshot = await this.snapshot(user, step);
-    return this.transaction(async (client) => {
-      const current = await this.repository.findById(id, client);
-      if (!current || current.status !== 'IN_PROGRESS')
+  async completeStep(
+    user: AuthUser,
+    id: string,
+    requestedOperationId?: string,
+  ): Promise<TaskStepRecord> {
+    assertAuthUser(user);
+    await this.activeShiftAccess?.assertActiveShift(user);
+    const operationId = requestedOperationId?.trim() || randomUUID();
+    if (operationId.length > 120) throw new BadRequestException('operationId is invalid');
+    if (!this.database) {
+      const step = await this.prepareTransition(user, id, ['IN_PROGRESS'], 'complete');
+      const updated = await this.repository.update(step.id, {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        completedByUserId: user.id,
+        completionOperationId: operationId,
+      });
+      await this.createStepEvent(user, updated, 'STEP_COMPLETED');
+      return updated;
+    }
+    return this.database.$transaction(async (client) => {
+      const duplicate = await client.taskStep.findUnique({
+        where: { completionOperationId: operationId },
+      });
+      if (duplicate) {
+        if (duplicate.id !== id)
+          throw new BadRequestException('operationId belongs to another step');
+        return duplicate;
+      }
+      const current = await client.taskStep.findUnique({
+        where: { id },
+        include: {
+          task: {
+            include: { object: true, steps: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
+          },
+        },
+      });
+      if (
+        !current ||
+        current.task.deletedAt ||
+        (user.role === 'WORKER' && current.task.assigneeId !== user.id)
+      )
+        throw new NotFoundException('Task step not found');
+      if (current.task.status === 'PAUSED' || current.task.isWorkBlocked)
+        throw new BadRequestException('Работа по задаче приостановлена');
+      if (current.task.status !== 'IN_PROGRESS')
+        throw new BadRequestException('Start the task before working with its steps');
+      if (current.status !== 'IN_PROGRESS')
         throw new BadRequestException('Task step was already completed');
-      const updated = await this.repository.update(
-        step.id,
-        { status: 'COMPLETED', completedAt: new Date() },
+      const activeSteps = current.task.steps.filter((step) => step.status === 'IN_PROGRESS');
+      if (activeSteps.length !== 1 || activeSteps[0].id !== current.id)
+        throw new BadRequestException('Another task step is active');
+      if (
+        current.task.steps.some((step) => step.order < current.order && step.status !== 'COMPLETED')
+      )
+        throw new BadRequestException('Complete the previous task step first');
+      const photoCount = await client.artifact.count({
+        where: { taskId: current.taskId, taskStepId: current.id, type: 'PHOTO' },
+      });
+      const requiredPhotoCount = Math.max(2, current.minimumPhotoCount);
+      if (photoCount < requiredPhotoCount)
+        throw new BadRequestException(photoRequirementMessage(requiredPhotoCount));
+      const completedAt = new Date();
+      const updated = await client.taskStep.update({
+        where: { id: current.id },
+        data: {
+          status: 'COMPLETED',
+          completedAt,
+          completedByUserId: user.id,
+          completionOperationId: operationId,
+        },
+      });
+      const snapshot = await this.snapshot(user, current);
+      await this.createStepEvent(
+        user,
+        updated,
+        'STEP_COMPLETED',
         client,
+        { ...snapshot, photoCount, minimumPhotoCount: requiredPhotoCount },
+        `step:complete:${operationId}`,
       );
-      await this.createStepEvent(user, updated, 'STEP_COMPLETED', client, snapshot);
+      const next = current.task.steps.find(
+        (step) => step.order > current.order && !['COMPLETED', 'CANCELLED'].includes(step.status),
+      );
+      if (next) {
+        const started = await client.taskStep.update({
+          where: { id: next.id },
+          data: { status: 'IN_PROGRESS', startedAt: new Date() },
+        });
+        await this.createStepEvent(
+          user,
+          started,
+          'STEP_STARTED',
+          client,
+          { ...snapshot, stepTitle: started.title },
+          `step:start-after:${operationId}`,
+        );
+      }
       return updated;
     });
   }
@@ -139,6 +225,29 @@ export class TaskStepService {
 
     const step = await this.getStep(id);
 
+    if (user.role === 'WORKER' && this.database) {
+      const task = await this.database.task.findUnique({
+        where: { id: step.taskId },
+        include: { steps: { orderBy: { order: 'asc' } } },
+      });
+      if (!task || task.deletedAt || task.assigneeId !== user.id)
+        throw new NotFoundException('Task step not found');
+      if (task.isWorkBlocked || task.status === 'PAUSED')
+        throw new BadRequestException('Работа по задаче приостановлена');
+      if (task.status !== 'IN_PROGRESS')
+        throw new BadRequestException('Start the task before working with its steps');
+      const index = task.steps.findIndex((candidate) => candidate.id === step.id);
+      if (task.steps.slice(0, index).some((candidate) => candidate.status !== 'COMPLETED'))
+        throw new BadRequestException('Complete the previous task step first');
+      if (
+        action === 'start' &&
+        task.steps.some(
+          (candidate) => candidate.id !== step.id && candidate.status === 'IN_PROGRESS',
+        )
+      )
+        throw new BadRequestException('Another task step is already active');
+    }
+
     if (!allowed.includes(step.status)) {
       throw new BadRequestException(`Task step cannot ${action} from status ${step.status}`);
     }
@@ -152,6 +261,7 @@ export class TaskStepService {
     type: EventType,
     client?: Prisma.TransactionClient,
     snapshot?: Record<string, unknown>,
+    idempotencyKey?: string,
   ): Promise<void> {
     await this.events.createEvent(
       {
@@ -161,6 +271,7 @@ export class TaskStepService {
         entityId: step.id,
         taskId: step.taskId,
         taskStepId: step.id,
+        idempotencyKey,
         payload: {
           taskId: step.taskId,
           status: step.status,
@@ -202,6 +313,16 @@ export class TaskStepService {
       ? this.database.$transaction((client) => action(client))
       : action(undefined);
   }
+}
+
+function photoRequirementMessage(count: number): string {
+  const word =
+    count % 10 === 1 && count % 100 !== 11
+      ? 'фотографию'
+      : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 12 || count % 100 > 14)
+        ? 'фотографии'
+        : 'фотографий';
+  return `Загрузите минимум ${count} ${word}, чтобы завершить этап.`;
 }
 
 function assertAuthUser(user: AuthUser): void {
