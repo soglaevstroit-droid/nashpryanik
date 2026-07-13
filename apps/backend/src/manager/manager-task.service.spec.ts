@@ -2,8 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BadRequestException } from '@nestjs/common';
 import { ManagerTaskService } from './manager-task.service.js';
+import { managerTaskUploadLimits } from './manager-task.controller.js';
 
 const manager = { id: 'manager-1', email: 'manager', role: 'FOREMAN' as const };
+
+test('manager task multipart limits fit a 100 MiB reverse proxy boundary', () => {
+  assert.deepEqual(managerTaskUploadLimits, {
+    files: 12,
+    fileSize: 8 * 1024 * 1024,
+    fields: 1,
+    fieldSize: 512 * 1024,
+  });
+  assert.ok(managerTaskUploadLimits.files * managerTaskUploadLimits.fileSize < 100 * 1024 * 1024);
+});
 
 test('lists only active workers for manager assignment', async () => {
   let where: unknown;

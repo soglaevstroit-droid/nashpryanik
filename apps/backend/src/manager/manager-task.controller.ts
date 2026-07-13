@@ -37,6 +37,13 @@ interface ManagerHistoryQuery {
   cursor?: string;
 }
 
+export const managerTaskUploadLimits = {
+  files: 12,
+  fileSize: 8 * 1024 * 1024,
+  fields: 1,
+  fieldSize: 512 * 1024,
+} as const;
+
 @Controller('api/v1/manager')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('FOREMAN', 'DIRECTOR', 'CREATOR')
@@ -58,7 +65,7 @@ export class ManagerTaskController {
     return this.manager.getTask(taskId);
   }
   @Post('tasks')
-  @UseInterceptors(FilesInterceptor('photos', 12))
+  @UseInterceptors(FilesInterceptor('photos', 12, { limits: managerTaskUploadLimits }))
   create(
     @CurrentUser() user: AuthUser,
     @Body('payload') payload: string,

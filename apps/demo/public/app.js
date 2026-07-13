@@ -4,6 +4,8 @@ const authTokenStorageKey = 'stroit.demo.accessToken';
 const legacyShiftStorageKey = 'stroit.demo.shiftOpen';
 const legacyShiftStateStorageKey = 'stroit.demo.shiftState';
 const workerEmail = 'ilya';
+const managerPhotoMaxBytes = 8 * 1024 * 1024;
+const managerPhotosMaxBytes = 96 * 1024 * 1024;
 
 const steps = [
   {
@@ -1032,6 +1034,11 @@ async function submitManagerTask(event) {
 }
 
 async function sendManagerTask(payload) {
+  const oversizedPhoto = managerSelectedFiles.find((file) => file.size > managerPhotoMaxBytes);
+  if (oversizedPhoto) return showMessage(`Фото «${oversizedPhoto.name}» превышает лимит 8 МБ`);
+  const photosSize = managerSelectedFiles.reduce((total, file) => total + file.size, 0);
+  if (photosSize > managerPhotosMaxBytes)
+    return showMessage('Общий размер фотографий превышает лимит 96 МБ');
   const data = new FormData();
   data.append('payload', JSON.stringify(payload));
   managerSelectedFiles.forEach((file) => data.append('photos', file));

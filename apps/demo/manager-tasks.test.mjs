@@ -19,3 +19,11 @@ test('worker cards preserve backend business lock and manager controls stay role
   assert.match(app, /function renderManagerControls/);
   assert.match(app, /data-manager-delete/);
 });
+
+test('manager task photos use binary multipart with safe upload limits', () => {
+  assert.match(app, /const data = new FormData\(\)/);
+  assert.match(app, /data\.append\('photos', file\)/);
+  assert.doesNotMatch(app, /readAsDataURL|data:image|base64/);
+  assert.match(app, /managerPhotoMaxBytes = 8 \* 1024 \* 1024/);
+  assert.match(app, /managerPhotosMaxBytes = 96 \* 1024 \* 1024/);
+});
