@@ -655,7 +655,22 @@ async function login() {
 }
 
 async function restoreSession() {
-  await showWorkspace();
+  try {
+    const response = await apiFetch('/api/v1/auth/me');
+    const body = await readResponseBody(response);
+
+    if (!response.ok) {
+      if (response.status === 401) handleUnauthorized();
+      else showMessage('Не удалось восстановить сессию. Обновите страницу и повторите попытку.');
+      return false;
+    }
+
+    currentUser = body;
+    return showWorkspace();
+  } catch {
+    showMessage('Backend недоступен. Проверьте соединение и повторите попытку.');
+    return false;
+  }
 }
 
 async function showWorkspace() {

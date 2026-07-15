@@ -22,3 +22,13 @@ test('worker and management role checks remain backend-role based', () => {
   );
   assert.match(app, /if \(!isManager\(\) && !isWorker\(\)\)/);
 });
+
+test('stored session restores the backend profile before role routing', () => {
+  const restoreSession =
+    app.match(/async function restoreSession\(\)[\s\S]*?\n}\n\nasync function showWorkspace/)?.[0] ?? '';
+  assert.match(restoreSession, /apiFetch\('\/api\/v1\/auth\/me'\)/);
+  assert.match(restoreSession, /currentUser = body/);
+  assert.ok(restoreSession.indexOf('currentUser = body') < restoreSession.indexOf('showWorkspace()'));
+  assert.match(restoreSession, /response\.status === 401/);
+  assert.doesNotMatch(restoreSession, /openView\('maintenance'\)/);
+});

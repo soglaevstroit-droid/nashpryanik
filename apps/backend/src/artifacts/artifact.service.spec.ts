@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AuthUser } from '../auth/auth-user.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { EventService } from '../events/event.service.js';
@@ -10,6 +10,7 @@ import { ArtifactRepository } from './artifact.repository.js';
 import { ArtifactStorageService } from './artifact-storage.service.js';
 import { ArtifactService } from './artifact.service.js';
 import { UploadedArtifactFile } from './uploaded-artifact-file.js';
+import { DatabaseService } from '../database/database.service.js';
 
 const createdAt = new Date('2026-07-09T00:00:00.000Z');
 const user: AuthUser = {
@@ -131,6 +132,17 @@ function createStorage(storageEvents: string[]): ArtifactStorageService {
   } as unknown as ArtifactStorageService;
 }
 
+function createAccessDatabase(assigneeByTask: Record<string, string>): DatabaseService {
+  return {
+    task: {
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const assigneeId = assigneeByTask[where.id];
+        return assigneeId ? { assigneeId } : null;
+      },
+    },
+  } as unknown as DatabaseService;
+}
+
 test('uploads photo, stores object, creates PHOTO_UPLOADED event and artifact', async () => {
   const eventTypes: string[] = [];
   const storageEvents: string[] = [];
@@ -168,6 +180,46 @@ test('gets photo download stream', async () => {
   const download = await service.getPhoto('artifact-1');
 
   assert.equal(download.artifact.id, 'artifact-1');
+  assert.deepEqual(storageEvents, ['get:photos/worker-1/2026-07-09/photo.jpg']);
+});
+
+test('worker can read a cloned task photo assigned to that worker', async () => {
+  const storageEvents: string[] = [];
+  const service = new ArtifactService(
+    createRepository([createArtifact({ uploadedBy: 'foreman-1' })]),
+    createStorage(storageEvents),
+    createEventService([]),
+    createAccessDatabase({ 'task-1': user.id }),
+  );
+
+  const download = await service.getPhoto(user, 'artifact-1');
+
+  assert.equal(download.artifact.taskId, 'task-1');
+  assert.deepEqual(storageEvents, ['get:photos/worker-1/2026-07-09/photo.jpg']);
+});
+
+test('worker cannot read an unrelated worker photo', async () => {
+  const service = new ArtifactService(
+    createRepository([createArtifact({ uploadedBy: 'worker-2' })]),
+    createStorage([]),
+    createEventService([]),
+    createAccessDatabase({ 'task-1': 'worker-2' }),
+  );
+
+  await assert.rejects(() => service.getPhoto(user, 'artifact-1'), NotFoundException);
+});
+
+test('foreman can read a worker task photo', async () => {
+  const storageEvents: string[] = [];
+  const service = new ArtifactService(
+    createRepository([createArtifact({ uploadedBy: user.id })]),
+    createStorage(storageEvents),
+    createEventService([]),
+    createAccessDatabase({ 'task-1': user.id }),
+  );
+
+  await service.getPhoto({ id: 'foreman-1', email: 'work2', role: 'FOREMAN' }, 'artifact-1');
+
   assert.deepEqual(storageEvents, ['get:photos/worker-1/2026-07-09/photo.jpg']);
 });
 

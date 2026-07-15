@@ -1,4 +1,4 @@
-/* global IntersectionObserver, ResizeObserver, URL */
+/* global ResizeObserver, URL */
 
 (function registerPhotoSlider() {
   class PhotoSlider {
@@ -25,7 +25,7 @@
       const slides = photos
         .map(
           (photo, index) =>
-            `<article class="photoSlide" data-photo-slide><img loading="lazy" decoding="async" data-slider-photo-id="${escapeText(photo.id)}" data-photo-gallery="${escapeText(id)}" alt="${escapeText(photo.originalFileName || 'Фото')}" aria-label="Фото ${index + 1} из ${photos.length}" /><span class="photoLockOverlay" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M12 14v3"/></svg></span></article>`,
+            `<article class="photoSlide" data-photo-slide><img data-slider-photo-id="${escapeText(photo.id)}" data-photo-gallery="${escapeText(id)}" alt="${escapeText(photo.originalFileName || 'Фото')}" aria-label="Фото ${index + 1} из ${photos.length}" /><span class="photoLockOverlay" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M12 14v3"/></svg></span></article>`,
         )
         .join('');
       const dots =
@@ -46,7 +46,7 @@
           if (image) this.open(image);
         });
         carousel.addEventListener('pointerup', (event) => this.handleGalleryTap(event));
-        this.observeSlides(carousel);
+        for (const slide of carousel.querySelectorAll('[data-photo-slide]')) void this.loadSlide(slide);
         if ('ResizeObserver' in window) {
           const resizeObserver = new ResizeObserver(() => {
             for (const image of carousel.querySelectorAll('[data-slider-photo-id][src]'))
@@ -54,7 +54,6 @@
           });
           resizeObserver.observe(carousel);
         }
-        this.preloadNeighbors(carousel, 0);
         this.updateIndicator(slider);
       }
     }
@@ -76,42 +75,16 @@
       return element?.closest('[data-photo-slider]')?.dataset.photoLocked === 'true';
     }
 
-    observeSlides(carousel) {
-      if (!('IntersectionObserver' in window)) {
-        this.loadSlide(carousel.querySelector('[data-photo-slide]'));
-        return;
-      }
-      const observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            this.loadSlide(entry.target);
-            const slides = [...carousel.querySelectorAll('[data-photo-slide]')];
-            this.preloadNeighbors(carousel, slides.indexOf(entry.target));
-          }
-        },
-        { root: carousel, rootMargin: '0px 100%', threshold: 0.01 },
-      );
-      for (const slide of carousel.querySelectorAll('[data-photo-slide]')) observer.observe(slide);
-    }
-
-    preloadNeighbors(carousel, index) {
-      const slides = [...carousel.querySelectorAll('[data-photo-slide]')];
-      for (const neighbor of [index - 1, index, index + 1])
-        if (slides[neighbor]) void this.loadSlide(slides[neighbor]);
-    }
-
     async loadSlide(slide) {
       const image = slide?.querySelector('[data-slider-photo-id]');
-      if (!image || image.dataset.photoLoading || image.src) return;
+      if (!image || image.dataset.photoLoading || image.hasAttribute('src')) return;
       image.dataset.photoLoading = 'true';
       try {
         const blob = await this.loadPhoto(image.dataset.sliderPhotoId);
         const url = URL.createObjectURL(blob);
         this.urls.add(url);
+        image.addEventListener('load', () => this.sizeSlide(image), { once: true });
         image.src = url;
-        await image.decode();
-        this.sizeSlide(image);
       } catch {
         slide.classList.add('is-broken');
         image.alt = 'Не удалось загрузить фото';
@@ -143,7 +116,6 @@
       );
       for (const [dotIndex, dot] of [...slider.querySelectorAll('[data-photo-dot]')].entries())
         dot.classList.toggle('is-active', dotIndex === index);
-      this.preloadNeighbors(carousel, index);
     }
 
     handleGalleryTap(event) {

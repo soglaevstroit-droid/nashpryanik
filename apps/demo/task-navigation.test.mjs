@@ -40,8 +40,28 @@ test('photo gallery keeps swipe behavior and dots without a numeric counter', ()
   assert.match(slider, /updateIndicator/);
   assert.match(slider, /carousel\.scrollLeft = 0/);
   assert.match(styles, /scroll-snap-type:\s*x mandatory/);
-  assert.match(styles, /touch-action:\s*pan-x/);
+  assert.match(styles, /touch-action:\s*pan-x pan-y pinch-zoom/);
   assert.match(styles, /\.photoSlide img[\s\S]*?object-fit:\s*contain/);
+});
+
+test('photo slider keeps vertical page scrolling and lets the browser resolve diagonal gestures', () => {
+  assert.match(styles, /\.photoCarousel[\s\S]*?touch-action:\s*pan-x pan-y pinch-zoom/);
+  assert.doesNotMatch(
+    slider.match(/mount\(root\)[\s\S]*?\n {4}clear\(root\)/)?.[0] ?? '',
+    /preventDefault/,
+  );
+  assert.match(styles, /scroll-snap-type:\s*x mandatory/);
+  assert.match(styles, /-webkit-overflow-scrolling:\s*touch/);
+  assert.match(styles, /\.photoViewer img[\s\S]*?touch-action:\s*none/);
+});
+
+test('photo loading stays on the rollback path without viewport optimizations', () => {
+  assert.match(slider, /for \(const slide of carousel\.querySelectorAll\('\[data-photo-slide\]'\)\)/);
+  assert.match(slider, /URL\.createObjectURL\(blob\)/);
+  assert.match(slider, /image\.src = url/);
+  assert.doesNotMatch(slider, /decode\(|IntersectionObserver|AbortController|loadToken|instanceId/);
+  assert.doesNotMatch(slider, /preloadNeighbors|MutationObserver|photoSkeleton|photoUnavailable/);
+  assert.doesNotMatch(styles, /photoSkeleton|photoUnavailable|photoDiagnostic/);
 });
 
 test('task title uses a balanced header zone and responsive 19–20px type', () => {
@@ -156,9 +176,7 @@ test('resting worker cannot navigate or open the full-screen viewer', () => {
   assert.match(app, /aria-disabled/);
 });
 
-test('fullscreen viewer supports zoom, pan, swipe and lazy neighboring loads', () => {
-  assert.match(slider, /loading="lazy"/);
-  assert.match(slider, /preloadNeighbors/);
+test('fullscreen viewer supports zoom, pan and swipe', () => {
   assert.match(slider, /clamp\([^,]+, 1, 4\)/);
   assert.match(slider, /toggleZoom/);
   assert.match(slider, /totalY > 100/);
