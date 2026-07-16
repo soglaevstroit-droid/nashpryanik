@@ -6,6 +6,7 @@ const app = await readFile(new URL('./public/app.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('./public/index.html', import.meta.url), 'utf8');
 const styles = await readFile(new URL('./public/styles.css', import.meta.url), 'utf8');
 const slider = await readFile(new URL('./public/photo-slider.js', import.meta.url), 'utf8');
+const placeholder = await readFile(new URL('./public/photo-placeholder.js', import.meta.url), 'utf8');
 const seed = await readFile(
   new URL('../backend/src/database/bootstrap-demo-worker.ts', import.meta.url),
   'utf8',
@@ -62,6 +63,24 @@ test('photo loading stays on the rollback path without viewport optimizations', 
   assert.doesNotMatch(slider, /decode\(|IntersectionObserver|AbortController|loadToken|instanceId/);
   assert.doesNotMatch(slider, /preloadNeighbors|MutationObserver|photoSkeleton|photoUnavailable/);
   assert.doesNotMatch(styles, /photoSkeleton|photoUnavailable|photoDiagnostic/);
+});
+
+test('photo placeholder is a presentation-only layer with branded building blocks', () => {
+  assert.match(html, /photo-placeholder\.js/);
+  assert.match(placeholder, /photoLoadingPlaceholder/);
+  assert.match(placeholder, /строит\.рф/);
+  assert.match(placeholder, /Загружаем фотографию/);
+  assert.match(placeholder, /image\.addEventListener\('load'/);
+  assert.doesNotMatch(
+    placeholder,
+    /fetch|Authorization|Artifact|Blob|ObjectURL|JWT|MinIO|decode\(|img\.onerror/,
+  );
+  assert.match(styles, /\.photoLoadingBlocks i[\s\S]*?width:\s*7px[\s\S]*?height:\s*7px/);
+  assert.match(styles, /animation:\s*photo-loading-block 540ms/);
+  assert.match(styles, /animation-delay:\s*150ms/);
+  assert.match(styles, /background:\s*var\(--accent\)/);
+  assert.match(styles, /\.photoSlide\.is-photo-loaded \.photoLoadingPlaceholder[\s\S]*?opacity:\s*0/);
+  assert.match(styles, /\.photoSlide\.is-broken \.photoLoadingPlaceholder[\s\S]*?display:\s*none/);
 });
 
 test('task title uses a balanced header zone and responsive 19–20px type', () => {

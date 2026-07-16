@@ -1515,12 +1515,112 @@ p {
   width: 88%;
   height: var(--photo-slide-height);
   min-width: 0;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  background: var(--bg);
   scroll-snap-align: start;
   cursor: zoom-in;
 }
 
 .photoSlide img {
-  transition: filter 210ms ease;
+  position: relative;
+  z-index: 1;
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    filter 210ms ease;
+}
+
+.photoSlide.is-photo-loaded img {
+  opacity: 1;
+}
+
+.photoLoadingPlaceholder {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 28px;
+  border-radius: inherit;
+  background: var(--bg);
+  color: var(--text);
+  opacity: 1;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.photoSlide.is-photo-loaded .photoLoadingPlaceholder {
+  opacity: 0;
+}
+
+.photoSlide.is-broken .photoLoadingPlaceholder {
+  display: none;
+}
+
+.photoLoadingBrand {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  opacity: 0.75;
+}
+
+.photoLoadingLabel {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  opacity: 0.6;
+}
+
+.photoLoadingBlocks {
+  display: flex;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.photoLoadingBlocks i {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--text);
+  opacity: 0.28;
+  animation: photo-loading-block 540ms steps(1, end) infinite;
+  animation-delay: 150ms;
+}
+
+.photoLoadingBlocks i:nth-child(2) {
+  animation-delay: 330ms;
+}
+
+.photoLoadingBlocks i:nth-child(3) {
+  animation-delay: 510ms;
+}
+
+@keyframes photo-loading-block {
+  0%,
+  32% {
+    background: var(--accent);
+    opacity: 1;
+  }
+
+  33%,
+  100% {
+    background: var(--text);
+    opacity: 0.28;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .photoLoadingBlocks i {
+    animation: none;
+  }
+
+  .photoLoadingBlocks i:nth-child(2) {
+    background: var(--accent);
+    opacity: 1;
+  }
 }
 
 [data-photo-locked='true'] .photoSlide img {
@@ -1534,6 +1634,7 @@ p {
   width: var(--photo-lock-size);
   height: var(--photo-lock-size);
   color: #fff;
+  z-index: 2;
   opacity: 0;
   pointer-events: none;
   transform: translate(-50%, -50%);
