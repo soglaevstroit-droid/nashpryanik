@@ -46,6 +46,15 @@ export class ArtifactStorageService {
     return `photos/${userId}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}${extension}`;
   }
 
+  generatePreviewStorageKey(originalStorageKey: string): string {
+    const extensionIndex = originalStorageKey.lastIndexOf('.');
+    const base =
+      extensionIndex > originalStorageKey.lastIndexOf('/')
+        ? originalStorageKey.slice(0, extensionIndex)
+        : originalStorageKey;
+    return `${base}.preview.jpg`;
+  }
+
   private async ensureBucket(): Promise<void> {
     if (this.bucketReady) {
       return;

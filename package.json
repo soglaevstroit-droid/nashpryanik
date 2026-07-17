@@ -27,6 +27,7 @@
     "testdata:extended:clean": "npm run testdata:extended:clean -w @stroit/backend",
     "testdata:clone-ilya-to-work": "npm run testdata:clone-ilya-to-work -w @stroit/backend",
     "testdata:clone-ilya-to-work:clean": "npm run testdata:clone-ilya-to-work:clean -w @stroit/backend",
+    "artifacts:preview:backfill": "npm run artifacts:preview:backfill -w @stroit/backend --",
     "demo:dev": "node apps/demo/server.mjs",
     "publish": "node scripts/publish.mjs",
     "publish:check": "node scripts/publish-check.mjs",

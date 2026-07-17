@@ -258,7 +258,9 @@ export class ManagerTaskService {
       return this.getTask(taskId);
     } catch (error) {
       await Promise.all(
-        uploads.map((upload) => this.artifacts.deleteStoredPhoto(upload.storageKey)),
+        uploads.map((upload) =>
+          this.artifacts.deleteStoredPhoto(upload.storageKey, upload.preview?.storageKey),
+        ),
       );
       throw error;
     }
@@ -620,7 +622,9 @@ export class ManagerTaskService {
       return this.getTask(taskId);
     } catch (error) {
       await Promise.all(
-        uploads.map((upload) => this.artifacts.deleteStoredPhoto(upload.storageKey)),
+        uploads.map((upload) =>
+          this.artifacts.deleteStoredPhoto(upload.storageKey, upload.preview?.storageKey),
+        ),
       );
       throw error;
     }

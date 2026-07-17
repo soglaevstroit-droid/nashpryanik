@@ -367,7 +367,7 @@ export class WorkShiftService {
       });
     } catch (error) {
       if (stored) {
-        await this.artifacts.deleteStoredPhoto(uploaded.storageKey);
+        await this.artifacts.deleteStoredPhoto(uploaded.storageKey, uploaded.preview?.storageKey);
       }
 
       if (isPrismaUniqueConstraintError(error)) {

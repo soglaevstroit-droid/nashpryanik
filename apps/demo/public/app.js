@@ -261,7 +261,12 @@ const elements = {
 };
 
 const photoSlider = new PhotoSlider({
-  loadPhoto: async (id) => {
+  loadPreview: async (id) => {
+    const response = await apiFetch(`/api/v1/artifacts/${id}/preview`);
+    if (!response.ok) throw new Error('Photo preview is unavailable');
+    return response.blob();
+  },
+  loadOriginal: async (id) => {
     const response = await apiFetch(`/api/v1/artifacts/${id}`);
     if (!response.ok) throw new Error('Photo is unavailable');
     return response.blob();
@@ -269,6 +274,7 @@ const photoSlider = new PhotoSlider({
   viewer: {
     root: document.querySelector('#photoViewer'),
     image: document.querySelector('#photoViewerImage'),
+    status: document.querySelector('#photoViewerStatus'),
   },
   onLockedAttempt: notifyTaskLocked,
 });

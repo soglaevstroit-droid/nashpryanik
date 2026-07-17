@@ -10,13 +10,17 @@ export interface ArtifactRecord {
   workShiftId?: string | null;
   uploadedBy: string;
   storageKey: string;
+  previewStorageKey: string | null;
   originalFileName: string;
   mimeType: string;
+  previewMimeType: string | null;
   fileSize: number;
+  previewFileSize: number | null;
   createdAt: Date;
 }
 
 export interface ArtifactDownload {
   artifact: ArtifactRecord;
   stream: Readable;
+  mimeType: string;
 }

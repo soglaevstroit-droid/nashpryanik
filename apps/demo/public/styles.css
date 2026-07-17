@@ -1674,6 +1674,29 @@ p {
   object-fit: contain;
 }
 
+.photoSlider.is-single .photoCarousel {
+  gap: 0;
+  width: 100%;
+  margin-right: 0;
+  padding-right: 0;
+  overflow-x: hidden;
+  scroll-padding-right: 0;
+  scroll-snap-type: none;
+  touch-action: pan-y pinch-zoom;
+}
+
+.photoSlider.is-single .photoSlide {
+  flex-basis: 100%;
+  width: 100%;
+}
+
+.photoSlider.is-single .photoSlide img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
 .photoOpenButton {
   display: block;
   width: 100%;
@@ -1898,6 +1921,24 @@ p {
   touch-action: none;
   transition: transform 180ms ease;
   will-change: transform;
+}
+
+.photoViewerStatus {
+  position: absolute;
+  z-index: 3;
+  right: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  left: 20px;
+  width: fit-content;
+  max-width: min(520px, calc(100vw - 40px));
+  margin: 0 auto;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgb(17 17 17 / 72%);
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+  pointer-events: none;
 }
 
 .photoViewerClose,

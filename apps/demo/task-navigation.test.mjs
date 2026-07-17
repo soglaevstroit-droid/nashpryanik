@@ -56,13 +56,21 @@ test('photo slider keeps vertical page scrolling and lets the browser resolve di
   assert.match(styles, /\.photoViewer img[\s\S]*?touch-action:\s*none/);
 });
 
-test('photo loading stays on the rollback path without viewport optimizations', () => {
-  assert.match(slider, /for \(const slide of carousel\.querySelectorAll\('\[data-photo-slide\]'\)\)/);
+test('photo scheduler loads previews near viewport without changing the stable image assignment', () => {
+  assert.match(slider, /new IntersectionObserver/);
+  assert.match(slider, /rootMargin:\s*'600px 0px'/);
+  assert.match(slider, /this\.enqueue\(slides\[0\], 'high'\)/);
+  assert.match(slider, /this\.enqueue\(slides\[1\], 'normal'\)/);
+  assert.match(slider, /this\.enqueue\(slides\[2\], 'normal'\)/);
+  assert.match(slider, /slides\.slice\(3\)/);
+  assert.match(slider, /slides\[index \+ direction\].*'high'/);
   assert.match(slider, /URL\.createObjectURL\(blob\)/);
   assert.match(slider, /image\.src = url/);
-  assert.doesNotMatch(slider, /decode\(|IntersectionObserver|AbortController|loadToken|instanceId/);
-  assert.doesNotMatch(slider, /preloadNeighbors|MutationObserver|photoSkeleton|photoUnavailable/);
+  assert.doesNotMatch(slider, /decode\(|AbortController|loadToken|instanceId/);
+  assert.doesNotMatch(slider, /MutationObserver|photoSkeleton|photoUnavailable/);
   assert.doesNotMatch(styles, /photoSkeleton|photoUnavailable|photoDiagnostic/);
+  assert.match(app, /artifacts\/\$\{id\}\/preview/);
+  assert.match(app, /loadOriginal:[\s\S]*?artifacts\/\$\{id\}`/);
 });
 
 test('photo placeholder is a presentation-only layer with branded building blocks', () => {
@@ -196,6 +204,10 @@ test('resting worker cannot navigate or open the full-screen viewer', () => {
 });
 
 test('fullscreen viewer supports zoom, pan and swipe', () => {
+  assert.match(slider, /this\.viewer\.image\.src = image\.src/);
+  assert.match(slider, /loadViewerOriginal/);
+  assert.match(slider, /this\.viewer\.image\.src = url/);
+  assert.match(html, /id="photoViewerStatus"/);
   assert.match(slider, /clamp\([^,]+, 1, 4\)/);
   assert.match(slider, /toggleZoom/);
   assert.match(slider, /totalY > 100/);

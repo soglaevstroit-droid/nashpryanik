@@ -101,9 +101,12 @@ export class WorkShiftPhotoRepository {
       taskStepId: artifact.taskStepId,
       uploadedBy: artifact.uploadedBy,
       storageKey: artifact.storageKey,
+      previewStorageKey: artifact.previewStorageKey,
       originalFileName: artifact.originalFileName,
       mimeType: artifact.mimeType,
+      previewMimeType: artifact.previewMimeType,
       fileSize: artifact.fileSize,
+      previewFileSize: artifact.previewFileSize,
       createdAt: artifact.createdAt,
     };
   }

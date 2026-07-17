@@ -11,6 +11,7 @@ import { ArtifactStorageService } from './artifact-storage.service.js';
 import { ArtifactService } from './artifact.service.js';
 import { UploadedArtifactFile } from './uploaded-artifact-file.js';
 import { DatabaseService } from '../database/database.service.js';
+import { PhotoPreviewService } from './photo-preview.service.js';
 
 const createdAt = new Date('2026-07-09T00:00:00.000Z');
 const user: AuthUser = {
@@ -43,9 +44,12 @@ function createArtifact(overrides: Partial<ArtifactRecord> = {}): ArtifactRecord
     taskStepId: 'step-1',
     uploadedBy: user.id,
     storageKey: 'photos/worker-1/2026-07-09/photo.jpg',
+    previewStorageKey: null,
     originalFileName: 'progress.jpg',
     mimeType: 'image/jpeg',
+    previewMimeType: null,
     fileSize: 11,
+    previewFileSize: null,
     createdAt,
     ...overrides,
   };
@@ -66,9 +70,12 @@ function createRepository(seed: ArtifactRecord[] = []): ArtifactRepository {
         taskStepId: data.taskStepId ?? null,
         uploadedBy: data.uploadedBy,
         storageKey: data.storageKey,
+        previewStorageKey: data.previewStorageKey ?? null,
         originalFileName: data.originalFileName,
         mimeType: data.mimeType,
+        previewMimeType: data.previewMimeType ?? null,
         fileSize: data.fileSize,
+        previewFileSize: data.previewFileSize ?? null,
       });
 
       artifacts.unshift(artifact);
@@ -118,6 +125,7 @@ function createStorage(storageEvents: string[]): ArtifactStorageService {
   return {
     generatePhotoStorageKey: (userId: string, fileName: string) =>
       `photos/${userId}/2026-07-09/${fileName}`,
+    generatePreviewStorageKey: (storageKey: string) => `${storageKey}.preview.jpg`,
     uploadPhoto: async (storageKey: string) => {
       storageEvents.push(`upload:${storageKey}`);
     },
@@ -180,7 +188,142 @@ test('gets photo download stream', async () => {
   const download = await service.getPhoto('artifact-1');
 
   assert.equal(download.artifact.id, 'artifact-1');
+  assert.equal(download.mimeType, 'image/jpeg');
   assert.deepEqual(storageEvents, ['get:photos/worker-1/2026-07-09/photo.jpg']);
+});
+
+test('preview endpoint returns preview when available and original for legacy artifacts', async () => {
+  const storageEvents: string[] = [];
+  const service = new ArtifactService(
+    createRepository([
+      createArtifact({
+        id: 'preview-artifact',
+        previewStorageKey: 'photos/worker-1/2026-07-09/photo.preview.jpg',
+        previewMimeType: 'image/jpeg',
+        previewFileSize: 5,
+      }),
+      createArtifact({ id: 'legacy-artifact' }),
+    ]),
+    createStorage(storageEvents),
+    createEventService([]),
+  );
+
+  const preview = await service.getPhotoPreview(
+    { id: 'foreman-1', email: 'manager', role: 'FOREMAN' },
+    'preview-artifact',
+  );
+  const fallback = await service.getPhotoPreview(user, 'legacy-artifact');
+
+  assert.equal(preview.mimeType, 'image/jpeg');
+  assert.equal(fallback.mimeType, 'image/jpeg');
+  assert.deepEqual(storageEvents, [
+    'get:photos/worker-1/2026-07-09/photo.preview.jpg',
+    'get:photos/worker-1/2026-07-09/photo.jpg',
+  ]);
+});
+
+test('preview endpoint safely falls back when preview metadata exists but the object is missing', async () => {
+  const storageEvents: string[] = [];
+  const storage = createStorage(storageEvents);
+  const originalGetObject = storage.getObject.bind(storage);
+  storage.getObject = async (storageKey: string) => {
+    if (storageKey.endsWith('.preview.jpg')) {
+      storageEvents.push(`get:${storageKey}`);
+      throw new Error('missing preview');
+    }
+    return originalGetObject(storageKey);
+  };
+  const service = new ArtifactService(
+    createRepository([
+      createArtifact({
+        previewStorageKey: 'photos/worker-1/2026-07-09/photo.preview.jpg',
+        previewMimeType: 'image/jpeg',
+        previewFileSize: 5,
+      }),
+    ]),
+    storage,
+    createEventService([]),
+  );
+
+  const fallback = await service.getPhotoPreview(user, 'artifact-1');
+
+  assert.equal(fallback.mimeType, 'image/jpeg');
+  assert.deepEqual(storageEvents, [
+    'get:photos/worker-1/2026-07-09/photo.preview.jpg',
+    'get:photos/worker-1/2026-07-09/photo.jpg',
+  ]);
+});
+
+test('preview endpoint applies the same worker access rules as original', async () => {
+  const service = new ArtifactService(
+    createRepository([
+      createArtifact({
+        uploadedBy: 'worker-2',
+        previewStorageKey: 'photos/worker-2/photo.preview.jpg',
+        previewMimeType: 'image/jpeg',
+        previewFileSize: 5,
+      }),
+    ]),
+    createStorage([]),
+    createEventService([]),
+    createAccessDatabase({ 'task-1': 'worker-2' }),
+  );
+
+  await assert.rejects(() => service.getPhotoPreview(user, 'artifact-1'), NotFoundException);
+});
+
+test('preview failure does not fail original upload or populate preview fields', async () => {
+  const storageEvents: string[] = [];
+  const previews = {
+    generate: async () => {
+      throw new Error('preview failed');
+    },
+  } as unknown as PhotoPreviewService;
+  const service = new ArtifactService(
+    createRepository(),
+    createStorage(storageEvents),
+    createEventService([]),
+    undefined,
+    undefined,
+    previews,
+  );
+
+  const artifact = await service.uploadPhoto(user, {}, createFile());
+
+  assert.equal(artifact.previewStorageKey, null);
+  assert.equal(artifact.previewMimeType, null);
+  assert.equal(artifact.previewFileSize, null);
+  assert.deepEqual(storageEvents, ['upload:photos/worker-1/2026-07-09/progress.jpg']);
+});
+
+test('successful preview upload records independent storage metadata', async () => {
+  const storageEvents: string[] = [];
+  const previews = {
+    generate: async () => ({
+      buffer: Buffer.from('preview'),
+      mimeType: 'image/jpeg',
+      extension: 'jpg',
+      width: 16,
+      height: 8,
+    }),
+  } as unknown as PhotoPreviewService;
+  const service = new ArtifactService(
+    createRepository(),
+    createStorage(storageEvents),
+    createEventService([]),
+    undefined,
+    undefined,
+    previews,
+  );
+
+  const artifact = await service.uploadPhoto(user, {}, createFile());
+
+  assert.equal(artifact.previewStorageKey, 'photos/worker-1/2026-07-09/progress.jpg.preview.jpg');
+  assert.equal(artifact.previewFileSize, 7);
+  assert.deepEqual(storageEvents, [
+    'upload:photos/worker-1/2026-07-09/progress.jpg',
+    'upload:photos/worker-1/2026-07-09/progress.jpg.preview.jpg',
+  ]);
 });
 
 test('worker can read a cloned task photo assigned to that worker', async () => {

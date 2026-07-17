@@ -10,6 +10,7 @@ import { ArtifactController } from './artifact.controller.js';
 import { ArtifactRepository } from './artifact.repository.js';
 import { ArtifactStorageService } from './artifact-storage.service.js';
 import { ArtifactService } from './artifact.service.js';
+import { PhotoPreviewService } from './photo-preview.service.js';
 
 @Module({
   imports: [ActiveShiftAccessModule, AppConfigModule, DatabaseModule, EventModule],
@@ -17,6 +18,7 @@ import { ArtifactService } from './artifact.service.js';
   providers: [
     ArtifactRepository,
     ArtifactStorageService,
+    PhotoPreviewService,
     ArtifactService,
     JwtService,
     JwtAuthGuard,

@@ -383,20 +383,23 @@ model TaskStep {
 }
 
 model Artifact {
-  id               String          @id @default(uuid())
-  type             ArtifactType    @default(PHOTO)
-  eventId          String
-  taskId           String?
-  taskStepId       String?
-  workShiftId      String?
-  uploadedBy       String
-  storageKey       String
-  originalFileName String
-  mimeType         String
-  fileSize         Int
-  createdAt        DateTime        @default(now())
-  workShiftPhoto   WorkShiftPhoto?
-  event            Event           @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  id                String          @id @default(uuid())
+  type              ArtifactType    @default(PHOTO)
+  eventId           String
+  taskId            String?
+  taskStepId        String?
+  workShiftId       String?
+  uploadedBy        String
+  storageKey        String
+  previewStorageKey String?
+  originalFileName  String
+  mimeType          String
+  previewMimeType   String?
+  fileSize          Int
+  previewFileSize   Int?
+  createdAt         DateTime        @default(now())
+  workShiftPhoto    WorkShiftPhoto?
+  event             Event           @relation(fields: [eventId], references: [id], onDelete: Restrict)
 
   @@index([type])
   @@index([eventId])

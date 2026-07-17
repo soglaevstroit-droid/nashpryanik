@@ -46,8 +46,22 @@ export class ArtifactController {
     const download = await this.artifacts.getPhoto(user, id);
 
     return new StreamableFile(download.stream, {
-      type: download.artifact.mimeType,
+      type: download.mimeType,
       disposition: `inline; filename="${download.artifact.originalFileName}"`,
+    });
+  }
+
+  @Get('artifacts/:id/preview')
+  @Roles(...readPhotoRoles)
+  async getPhotoPreview(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+  ): Promise<StreamableFile> {
+    const download = await this.artifacts.getPhotoPreview(user, id);
+
+    return new StreamableFile(download.stream, {
+      type: download.mimeType,
+      disposition: `inline; filename="preview-${download.artifact.originalFileName}"`,
     });
   }
 

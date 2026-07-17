@@ -9,6 +9,7 @@ import { ArtifactStorageService } from './artifact-storage.service.js';
 import { UploadedArtifactFile } from './uploaded-artifact-file.js';
 import { DatabaseService } from '../database/database.service.js';
 import { ActiveShiftAccessService } from '../work-shifts/active-shift-access.service.js';
+import { PhotoPreviewService } from './photo-preview.service.js';
 
 const maxPhotoFileSizeBytes = 10 * 1024 * 1024;
 const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/webp']);
@@ -26,6 +27,13 @@ export interface UploadedPhotoObject {
   storageKey: string;
   file: UploadedArtifactFile;
   inspection: PhotoInspection;
+  preview: UploadedPhotoPreview | null;
+}
+
+export interface UploadedPhotoPreview {
+  storageKey: string;
+  mimeType: string;
+  fileSize: number;
 }
 
 interface CreatePhotoArtifactRecordOptions {
@@ -44,6 +52,7 @@ export class ArtifactService {
     private readonly events: EventService,
     private readonly database?: DatabaseService,
     private readonly activeShiftAccess?: ActiveShiftAccessService,
+    private readonly previews?: PhotoPreviewService,
   ) {}
 
   async uploadPhoto(
@@ -76,7 +85,7 @@ export class ArtifactService {
           )
         : await this.createPhotoArtifactRecord(user, dto, uploaded);
     } catch (error) {
-      await this.deleteStoredPhoto(uploaded.storageKey);
+      await this.deleteStoredPhoto(uploaded.storageKey, uploaded.preview?.storageKey);
       throw error;
     }
   }
@@ -105,11 +114,34 @@ export class ArtifactService {
       storageKey,
       file: normalizedFile,
       inspection,
+      preview: null,
     };
   }
 
   async storePreparedPhoto(uploaded: UploadedPhotoObject): Promise<void> {
     await this.storage.uploadPhoto(uploaded.storageKey, uploaded.file);
+    if (!this.previews) return;
+
+    try {
+      const generated = await this.previews.generate(uploaded.file);
+      if (!generated) return;
+      const storageKey = this.storage.generatePreviewStorageKey(uploaded.storageKey);
+      await this.storage.uploadPhoto(storageKey, {
+        buffer: generated.buffer,
+        size: generated.buffer.length,
+        mimetype: generated.mimeType,
+        originalname: `preview.${generated.extension}`,
+      });
+      uploaded.preview = {
+        storageKey,
+        mimeType: generated.mimeType,
+        fileSize: generated.buffer.length,
+      };
+    } catch (error) {
+      console.warn('Photo preview generation failed; original remains available', {
+        error: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
   }
 
   async createPhotoArtifactRecord(
@@ -122,7 +154,7 @@ export class ArtifactService {
     assertAuthUser(user);
     assertUploadPhotoDto(dto);
 
-    const { file, storageKey } = uploaded;
+    const { file, preview, storageKey } = uploaded;
 
     const event = await this.events.createEvent(
       {
@@ -162,17 +194,29 @@ export class ArtifactService {
         workShiftId: options.workShiftId ?? null,
         uploadedBy: user.id,
         storageKey,
+        previewStorageKey: preview?.storageKey ?? null,
         originalFileName: file.originalname,
         mimeType: file.mimetype,
+        previewMimeType: preview?.mimeType ?? null,
         fileSize: file.size,
+        previewFileSize: preview?.fileSize ?? null,
       },
       client,
     );
   }
 
-  async deleteStoredPhoto(storageKey: string): Promise<void> {
+  async deleteStoredPhoto(storageKey: string, previewStorageKey?: string | null): Promise<void> {
+    if (previewStorageKey) {
+      await this.storage.deleteObject(previewStorageKey).catch((error: unknown) => {
+        console.error('Failed to delete orphan photo preview', {
+          error: error instanceof Error ? error.name : 'UnknownError',
+        });
+      });
+    }
     await this.storage.deleteObject(storageKey).catch((error: unknown) => {
-      console.error('Failed to delete orphan photo object', { storageKey, error });
+      console.error('Failed to delete orphan photo object', {
+        error: error instanceof Error ? error.name : 'UnknownError',
+      });
     });
   }
 
@@ -184,6 +228,36 @@ export class ArtifactService {
     return {
       artifact,
       stream,
+      mimeType: artifact.mimeType,
+    };
+  }
+
+  async getPhotoPreview(user: AuthUser, id: string): Promise<ArtifactDownload> {
+    const artifact = await this.getArtifactRecord(id);
+    await this.assertCanAccess(user, artifact);
+    const previewAvailable =
+      Boolean(artifact.previewStorageKey) &&
+      Boolean(artifact.previewMimeType) &&
+      Boolean(artifact.previewFileSize);
+    let stream;
+    let mimeType = artifact.mimeType;
+    if (previewAvailable) {
+      try {
+        stream = await this.storage.getObject(artifact.previewStorageKey!);
+        mimeType = artifact.previewMimeType!;
+      } catch (error) {
+        console.warn('Stored photo preview is unavailable; serving original', {
+          artifactId: artifact.id,
+          error: error instanceof Error ? error.name : 'UnknownError',
+        });
+      }
+    }
+    stream ??= await this.storage.getObject(artifact.storageKey);
+
+    return {
+      artifact,
+      stream,
+      mimeType,
     };
   }
 
@@ -223,6 +297,7 @@ export class ArtifactService {
       }
     }
 
+    if (artifact.previewStorageKey) await this.storage.deleteObject(artifact.previewStorageKey);
     await this.storage.deleteObject(artifact.storageKey);
 
     return this.repository.delete(artifact.id);

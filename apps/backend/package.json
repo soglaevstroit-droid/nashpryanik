@@ -17,7 +17,8 @@
     "testdata:extended": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/seed-extended-testdata.js",
     "testdata:extended:clean": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/seed-extended-testdata.js --clean",
     "testdata:clone-ilya-to-work": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/clone-ilya-to-work.js",
-    "testdata:clone-ilya-to-work:clean": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/clone-ilya-to-work.js --clean"
+    "testdata:clone-ilya-to-work:clean": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/clone-ilya-to-work.js --clean",
+    "artifacts:preview:backfill": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/artifact-preview-backfill.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.15",
@@ -26,7 +27,8 @@
     "@prisma/client": "^6.19.3",
     "minio": "^8.0.7",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",

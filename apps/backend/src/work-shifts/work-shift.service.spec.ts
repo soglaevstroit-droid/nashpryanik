@@ -67,9 +67,12 @@ function createArtifact(overrides: Partial<ArtifactRecord> = {}): ArtifactRecord
     taskStepId: null,
     uploadedBy: user.id,
     storageKey: 'photos/user-1/photo.jpg',
+    previewStorageKey: null,
     originalFileName: 'photo.jpg',
     mimeType: 'image/jpeg',
+    previewMimeType: null,
     fileSize: jpegFile().size,
+    previewFileSize: null,
     createdAt,
     ...overrides,
   };
@@ -246,6 +249,7 @@ function createArtifacts(events: string[]): ArtifactService {
         fileSize: file.size,
         extension: 'jpg',
       },
+      preview: null,
     }),
     createPhotoArtifactRecord: async (
       _user: AuthUser,

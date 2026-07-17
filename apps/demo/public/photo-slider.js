@@ -1,14 +1,16 @@
-/* global ResizeObserver, URL */
+/* global Image, IntersectionObserver, ResizeObserver, URL */
 
 (function registerPhotoSlider() {
   class PhotoSlider {
-    constructor({ loadPhoto, viewer, onLockedAttempt }) {
-      this.loadPhoto = loadPhoto;
+    constructor({ loadPhoto, loadPreview, loadOriginal, viewer, onLockedAttempt }) {
+      this.loadPreview = loadPreview ?? loadPhoto;
+      this.loadOriginal = loadOriginal ?? loadPhoto;
       this.viewer = viewer;
       this.onLockedAttempt = onLockedAttempt;
-      this.urls = new Set();
       this.viewerImages = [];
       this.viewerIndex = 0;
+      this.viewerRequest = 0;
+      this.viewerOriginalId = null;
       this.scale = 1;
       this.translateX = 0;
       this.translateY = 0;
@@ -16,7 +18,28 @@
       this.startDistance = 0;
       this.startScale = 1;
       this.lastTapAt = 0;
+      this.previewCache = new Map();
+      this.originalCache = new Map();
+      this.previewLoads = new Map();
+      this.originalLoads = new Map();
+      this.imageCacheKeys = new WeakMap();
+      this.loadJobs = new Map();
+      this.loadQueue = [];
+      this.loadOrder = 0;
+      this.activeLoads = 0;
+      this.maxConcurrentLoads = 4;
+      this.visibilityObserver =
+        'IntersectionObserver' in window
+          ? new IntersectionObserver(
+              (entries) => {
+                for (const entry of entries)
+                  if (entry.isIntersecting) this.startSlider(entry.target);
+              },
+              { rootMargin: '600px 0px', threshold: 0.01 },
+            )
+          : null;
       this.bindViewer();
+      window.addEventListener('beforeunload', () => this.destroy(), { once: true });
     }
 
     static render(photos, { id, emptyText = '', showEmpty = true, locked = false } = {}) {
@@ -32,7 +55,8 @@
         photos.length > 1
           ? `<div class="photoDots" aria-hidden="true">${photos.map((_, index) => `<i class="${index === 0 ? 'is-active' : ''}" data-photo-dot="${index}"></i>`).join('')}</div>`
           : '';
-      return `<div class="photoSlider" data-photo-slider="${escapeText(id)}" data-photo-locked="${locked}"><div class="photoCarousel" data-photo-carousel aria-label="Фотографии">${slides}</div>${dots}</div>`;
+      const layoutClass = photos.length === 1 ? 'is-single' : 'is-multiple';
+      return `<div class="photoSlider ${layoutClass}" data-photo-slider="${escapeText(id)}" data-photo-locked="${locked}"><div class="photoCarousel" data-photo-carousel aria-label="Фотографии">${slides}</div>${dots}</div>`;
     }
 
     mount(root) {
@@ -46,7 +70,6 @@
           if (image) this.open(image);
         });
         carousel.addEventListener('pointerup', (event) => this.handleGalleryTap(event));
-        for (const slide of carousel.querySelectorAll('[data-photo-slide]')) void this.loadSlide(slide);
         if ('ResizeObserver' in window) {
           const resizeObserver = new ResizeObserver(() => {
             for (const image of carousel.querySelectorAll('[data-slider-photo-id][src]'))
@@ -55,14 +78,17 @@
           resizeObserver.observe(carousel);
         }
         this.updateIndicator(slider);
+        if (this.visibilityObserver) this.visibilityObserver.observe(slider);
+        else this.startSlider(slider);
       }
     }
 
     clear(root) {
-      for (const image of root.querySelectorAll('[data-slider-photo-id][src^="blob:"]')) {
-        URL.revokeObjectURL(image.src);
-        this.urls.delete(image.src);
-      }
+      for (const slider of root.querySelectorAll('[data-photo-slider]'))
+        this.visibilityObserver?.unobserve(slider);
+      for (const image of root.querySelectorAll('[data-slider-photo-id]')) this.releaseImage(image);
+      this.evictCache(this.previewCache, 200);
+      this.evictCache(this.originalCache, 40);
     }
 
     setLocked(root, locked) {
@@ -79,23 +105,147 @@
       const image = slide?.querySelector('[data-slider-photo-id]');
       if (!image || image.dataset.photoLoading || image.hasAttribute('src')) return;
       image.dataset.photoLoading = 'true';
+      const artifactId = image.dataset.sliderPhotoId;
       try {
-        const blob = await this.loadPhoto(image.dataset.sliderPhotoId);
-        const url = URL.createObjectURL(blob);
-        this.urls.add(url);
-        image.addEventListener('load', () => this.sizeSlide(image), { once: true });
-        image.src = url;
-      } catch {
+        try {
+          const previewUrl = await this.getPhotoUrl(
+            this.previewCache,
+            this.previewLoads,
+            this.loadPreview,
+            artifactId,
+            200,
+          );
+          if (
+            await this.assignImage(
+              image,
+              previewUrl,
+              () => this.retainImage(image, this.previewCache, artifactId),
+            )
+          ) {
+            this.sizeSlide(image);
+            return true;
+          }
+          this.discardCacheEntry(this.previewCache, artifactId);
+        } catch {
+          this.discardCacheEntry(this.previewCache, artifactId);
+        }
+        try {
+          const originalUrl = await this.getPhotoUrl(
+            this.originalCache,
+            this.originalLoads,
+            this.loadOriginal,
+            artifactId,
+            40,
+          );
+          if (
+            await this.assignImage(
+              image,
+              originalUrl,
+              () => this.retainImage(image, this.originalCache, artifactId),
+            )
+          ) {
+            this.sizeSlide(image);
+            return true;
+          }
+        } catch {
+          // The shared error state below is used only after both preview and original fail.
+        }
         slide.classList.add('is-broken');
         image.alt = 'Не удалось загрузить фото';
+        return false;
       } finally {
         delete image.dataset.photoLoading;
+      }
+    }
+
+    assignImage(image, url, onLoad) {
+      return new Promise((resolve) => {
+        const cleanup = () => {
+          image.removeEventListener('load', handleLoad);
+          image.removeEventListener('error', handleError);
+        };
+        const handleLoad = () => {
+          cleanup();
+          onLoad();
+          resolve(true);
+        };
+        const handleError = () => {
+          cleanup();
+          resolve(false);
+        };
+        image.addEventListener('load', handleLoad);
+        image.addEventListener('error', handleError);
+        image.src = url;
+      });
+    }
+
+    startSlider(slider) {
+      if (!slider || slider.dataset.photoLoadStarted) return;
+      slider.dataset.photoLoadStarted = 'true';
+      this.visibilityObserver?.unobserve(slider);
+      const slides = [...slider.querySelectorAll('[data-photo-slide]')];
+      if (!slides.length) return;
+      void this.enqueue(slides[0], 'high')
+        .then(() =>
+          Promise.all([
+            slides[1] ? this.enqueue(slides[1], 'normal') : true,
+            slides[2] ? this.enqueue(slides[2], 'normal') : true,
+          ]),
+        )
+        .then(() => {
+          for (const slide of slides.slice(3)) void this.enqueue(slide, 'low');
+        });
+    }
+
+    enqueue(slide, priority) {
+      const image = slide?.querySelector('[data-slider-photo-id]');
+      if (!image || image.hasAttribute('src')) return Promise.resolve(true);
+      const rank = { high: 0, normal: 1, low: 2 }[priority];
+      const existing = this.loadJobs.get(slide);
+      if (existing) {
+        existing.rank = Math.min(existing.rank, rank);
+        this.drainQueue();
+        return existing.promise;
+      }
+      let resolveJob;
+      const promise = new Promise((resolve) => {
+        resolveJob = resolve;
+      });
+      const job = {
+        slide,
+        rank,
+        order: ++this.loadOrder,
+        promise,
+        resolve: resolveJob,
+      };
+      this.loadJobs.set(slide, job);
+      this.loadQueue.push(job);
+      this.drainQueue();
+      return promise;
+    }
+
+    drainQueue() {
+      this.loadQueue.sort((left, right) => left.rank - right.rank || left.order - right.order);
+      while (this.activeLoads < this.maxConcurrentLoads && this.loadQueue.length) {
+        const job = this.loadQueue.shift();
+        this.activeLoads += 1;
+        void this.loadSlide(job.slide)
+          .then((loaded) => job.resolve(loaded))
+          .finally(() => {
+            this.activeLoads -= 1;
+            this.loadJobs.delete(job.slide);
+            this.drainQueue();
+          });
       }
     }
 
     sizeSlide(image) {
       if (!image.naturalWidth || !image.naturalHeight) return;
       const slide = image.closest('[data-photo-slide]');
+      if (slide.closest('[data-photo-slider]')?.classList?.contains('is-single')) {
+        slide.style.width = '100%';
+        return;
+      }
       const carousel = slide.closest('[data-photo-carousel]');
       const height = slide.getBoundingClientRect().height;
       const intrinsicWidth = height * (image.naturalWidth / image.naturalHeight);
@@ -116,6 +266,13 @@
       );
       for (const [dotIndex, dot] of [...slider.querySelectorAll('[data-photo-dot]')].entries())
         dot.classList.toggle('is-active', dotIndex === index);
+      if (slider.dataset.photoLoadStarted) {
+        const previousScrollLeft = Number(slider.dataset.photoScrollLeft ?? 0);
+        const direction = carousel.scrollLeft >= previousScrollLeft ? 1 : -1;
+        void this.enqueue(slides[index], 'high');
+        if (slides[index + direction]) void this.enqueue(slides[index + direction], 'high');
+        slider.dataset.photoScrollLeft = String(carousel.scrollLeft);
+      }
     }
 
     handleGalleryTap(event) {
@@ -137,6 +294,7 @@
         (candidate) => candidate.dataset.photoGallery === gallery && candidate.src,
       );
       this.viewerIndex = Math.max(0, this.viewerImages.indexOf(image));
+      this.viewerOriginalId = null;
       this.resetTransform();
       this.renderViewer();
       this.viewer.root.hidden = false;
@@ -145,6 +303,9 @@
 
     close() {
       this.viewer.root.hidden = true;
+      this.viewerRequest += 1;
+      this.viewerOriginalId = null;
+      if (this.viewer.status) this.viewer.status.hidden = true;
       document.body.classList.remove('is-photo-viewer-open');
       this.pointers.clear();
       this.resetTransform();
@@ -163,7 +324,114 @@
       if (!image) return;
       this.viewer.image.src = image.src;
       this.viewer.image.alt = image.alt;
+      if (this.viewer.status) this.viewer.status.hidden = true;
       this.applyTransform();
+      void this.loadViewerOriginal(image);
+    }
+
+    async loadViewerOriginal(image) {
+      const artifactId = image.dataset.sliderPhotoId;
+      const request = ++this.viewerRequest;
+      this.viewerOriginalId = artifactId;
+      try {
+        const url = await this.getPhotoUrl(
+          this.originalCache,
+          this.originalLoads,
+          this.loadOriginal,
+          artifactId,
+          40,
+        );
+        await new Promise((resolve, reject) => {
+          const original = new Image();
+          original.addEventListener('load', resolve, { once: true });
+          original.addEventListener('error', reject, { once: true });
+          original.src = url;
+        });
+        if (
+          request !== this.viewerRequest ||
+          this.viewerImages[this.viewerIndex] !== image ||
+          this.viewer.root.hidden
+        )
+          return;
+        this.viewer.image.src = url;
+      } catch {
+        if (request !== this.viewerRequest || this.viewer.root.hidden) return;
+        if (this.viewer.status) {
+          this.viewer.status.textContent =
+            'Оригинал недоступен. Показываем загруженную версию фотографии.';
+          this.viewer.status.hidden = false;
+        }
+      }
+    }
+
+    async getPhotoUrl(cache, pending, loader, artifactId, limit) {
+      const cached = cache.get(artifactId);
+      if (cached) {
+        cached.lastUsed = Date.now();
+        return cached.url;
+      }
+      if (pending.has(artifactId)) return pending.get(artifactId);
+      const request = loader(artifactId)
+        .then((blob) => {
+          const entry = {
+            url: URL.createObjectURL(blob),
+            users: new Set(),
+            lastUsed: Date.now(),
+          };
+          cache.set(artifactId, entry);
+          this.evictCache(cache, limit);
+          return entry.url;
+        })
+        .finally(() => pending.delete(artifactId));
+      pending.set(artifactId, request);
+      return request;
+    }
+
+    retainImage(image, cache, artifactId) {
+      this.releaseImage(image);
+      const entry = cache.get(artifactId);
+      if (!entry) return;
+      entry.users.add(image);
+      entry.lastUsed = Date.now();
+      this.imageCacheKeys.set(image, { artifactId, cache });
+    }
+
+    releaseImage(image) {
+      const owner = this.imageCacheKeys.get(image);
+      if (!owner) return;
+      owner.cache.get(owner.artifactId)?.users.delete(image);
+      this.imageCacheKeys.delete(image);
+    }
+
+    discardCacheEntry(cache, artifactId) {
+      const entry = cache.get(artifactId);
+      if (!entry || entry.users.size) return;
+      URL.revokeObjectURL(entry.url);
+      cache.delete(artifactId);
+    }
+
+    evictCache(cache, limit) {
+      if (cache.size <= limit) return;
+      const removable = [...cache.entries()]
+        .filter(
+          ([artifactId, entry]) =>
+            entry.users.size === 0 &&
+            !(cache === this.originalCache && artifactId === this.viewerOriginalId),
+        )
+        .sort((left, right) => left[1].lastUsed - right[1].lastUsed);
+      while (cache.size > limit && removable.length) {
+        const [artifactId, entry] = removable.shift();
+        URL.revokeObjectURL(entry.url);
+        cache.delete(artifactId);
+      }
+    }
+
+    destroy() {
+      this.visibilityObserver?.disconnect();
+      for (const cache of [this.previewCache, this.originalCache]) {
+        for (const entry of cache.values()) URL.revokeObjectURL(entry.url);
+        cache.clear();
+      }
     }
 
     bindViewer() {
