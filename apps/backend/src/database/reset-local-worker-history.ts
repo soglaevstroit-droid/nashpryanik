@@ -14,6 +14,7 @@ const productionBackupPattern = /^stroit_dev_\d{8}T\d{6}Z\.(?:dump|sql\.gz)$/;
 const options = parseArguments(process.argv.slice(2));
 const confirmed = options.apply;
 const workEventTypes: EventType[] = [
+  'USER_LOGGED_IN',
   'WORK_SHIFT_STARTED',
   'WORK_SHIFT_PAUSED',
   'WORK_SHIFT_RESUMED',

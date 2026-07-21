@@ -35,3 +35,8 @@ test('worker reset preserves profiles, shared storage and blocks foreign worker 
   assert.match(source, /Cleanup apply is blocked because related data belongs to another WORKER/);
   assert.match(source, /artifactsFromOtherWorkers/);
 });
+
+test('worker reset removes historical login audit rows that surface in manager history', async () => {
+  const source = await readFile(sourceUrl, 'utf8');
+  assert.match(source, /const workEventTypes = \[\s*'USER_LOGGED_IN'/);
+});
