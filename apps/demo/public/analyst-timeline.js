@@ -37,13 +37,20 @@
   }
 
   function createIndexStore() {
-    const indexes = new Map();
+    const positions = new Map();
     return Object.freeze({
-      get(workerKey, frameCount) {
-        return resolveInitialIndex(indexes.get(workerKey), frameCount);
+      get(workerKey, frames) {
+        const frameIds = Array.isArray(frames) ? frames : null;
+        const frameCount = frameIds?.length ?? frames;
+        const stored = positions.get(workerKey);
+        if (frameIds && stored?.frameId) {
+          const matchingIndex = frameIds.indexOf(stored.frameId);
+          if (matchingIndex >= 0) return matchingIndex;
+        }
+        return resolveInitialIndex(stored?.index, frameCount);
       },
-      set(workerKey, index) {
-        if (workerKey && Number.isInteger(index)) indexes.set(workerKey, index);
+      set(workerKey, index, frameId = null) {
+        if (workerKey && Number.isInteger(index)) positions.set(workerKey, { index, frameId });
       },
     });
   }

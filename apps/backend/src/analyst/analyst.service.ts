@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { DatabaseService } from '../database/database.service.js';
+import {
+  calculateTaskCostSnapshot,
+  TaskCostSnapshot,
+  TaskCostStatus,
+} from '../tasks/task-cost-policy.js';
 
 const timelineEventTypes = [
   'WORK_SHIFT_STARTED',
@@ -32,10 +37,12 @@ type TimelineTask = Prisma.TaskGetPayload<{
   select: {
     id: true;
     title: true;
+    location: true;
     assigneeId: true;
     startedAt: true;
     completedAt: true;
     deletedAt: true;
+    object: { select: { name: true } };
   };
 }>;
 
@@ -66,6 +73,9 @@ interface TimelineFrame {
   taskDurationMinutes: number | null;
   taskCoins: number | null;
   taskCoinsState: 'PENDING' | 'AVAILABLE';
+  taskCostCoins?: number | null;
+  appliedRate?: number | null;
+  costStatus?: TaskCostStatus | null;
   metadata: Record<string, unknown>;
 }
 
@@ -222,10 +232,12 @@ export class AnalystService {
             select: {
               id: true,
               title: true,
+              location: true,
               assigneeId: true,
               startedAt: true,
               completedAt: true,
               deletedAt: true,
+              object: { select: { name: true } },
             },
           }),
           this.database.artifact.findMany({
@@ -283,7 +295,18 @@ export class AnalystService {
         (left, right) =>
           left.occurredAt.getTime() - right.occurredAt.getTime() || left.id.localeCompare(right.id),
       );
-      result.set(shift.id, timeline);
+      const groupedTimeline = addTaskSectionFrames(
+        timeline,
+        owner,
+        taskMap,
+        artifacts as TimelineArtifact[],
+        taskEvents,
+      );
+      if (shift.finishedAt)
+        groupedTimeline.push(
+          shiftSectionSummaryFrame(shift, owner, groupedTimeline, artifacts as TimelineArtifact[]),
+        );
+      result.set(shift.id, groupedTimeline);
     }
     return result;
   }
@@ -315,6 +338,7 @@ export class AnalystService {
     let reason: string | null = null;
     let artifact: { id: string; originalFileName: string } | null = event.artifacts[0] ?? null;
     let duration: number | null = null;
+    let taskCost: TaskCostSnapshot | null = null;
 
     if (event.type === 'WORK_SHIFT_STARTED') {
       title = `${name} начал работу`;
@@ -347,11 +371,18 @@ export class AnalystService {
       artifact =
         taskArtifacts.find((candidate) => candidate.id === completionPhotoId) ??
         latestArtifact(taskArtifacts, event.createdAt);
-      duration = taskDurationMinutes(task.id, taskEvents, task.startedAt, event.createdAt);
+      taskCost = resolveTaskCostSnapshot(
+        metadata,
+        task.id,
+        taskEvents,
+        task.startedAt,
+        event.createdAt,
+      );
+      duration = taskCost.taskWorkMinutes;
     } else if (event.type === 'WORK_SHIFT_FINISHED') {
       kind = 'SHIFT_COMPLETED';
-      title = `${name} завершил работу`;
-      description = 'Смена завершена';
+      title = `${displayName(owner)} завершил работу`;
+      description = null;
       artifact = shift.photos.find((photo) => photo.type === 'FINISH')?.artifact ?? null;
     } else {
       return null;
@@ -367,17 +398,12 @@ export class AnalystService {
       artifact: artifact ? artifactView(artifact) : null,
       reason,
       taskDurationMinutes: duration,
-      taskCoins: null,
-      taskCoinsState: 'PENDING',
-      metadata:
-        kind === 'SHIFT_COMPLETED'
-          ? {
-              shiftDurationMinutes: durationMinutes(shift.startedAt, shift.finishedAt),
-              completedTaskCount: shift.completedTasks.length,
-              shiftCoinUnits: shiftCoinUnits(shift),
-              shiftCoinsState: shift.accrual ? shift.accrual.status : 'PENDING',
-            }
-          : {},
+      taskCoins: taskCost?.taskCostCoinUnits ?? null,
+      taskCoinsState: taskCost?.costStatus === 'CALCULATED' ? 'AVAILABLE' : 'PENDING',
+      taskCostCoins: taskCost?.taskCostCoins ?? null,
+      appliedRate: taskCost?.appliedRate ?? null,
+      costStatus: taskCost?.costStatus ?? null,
+      metadata: {},
     };
   }
 }
@@ -464,7 +490,8 @@ function latestArtifact(artifacts: TimelineArtifact[], at: Date) {
   return artifacts.filter((artifact) => artifact.createdAt <= at).at(-1) ?? null;
 }
 
-function taskDurationMinutes(
+function resolveTaskCostSnapshot(
+  metadata: Record<string, unknown>,
   taskId: string,
   events: Array<{
     taskId: string | null;
@@ -474,27 +501,51 @@ function taskDurationMinutes(
   }>,
   startedAt: Date | null,
   completedAt: Date,
-) {
-  const relevant = events.filter((event) => event.taskId === taskId);
-  let activeSince = relevant.find((event) => event.type === 'TASK_STARTED')?.createdAt ?? startedAt;
-  let milliseconds = 0;
-  for (const event of relevant) {
+): TaskCostSnapshot {
+  const storedStatus = costStatusValue(metadata.costStatus);
+  if (storedStatus) {
+    const stored: TaskCostSnapshot = {
+      costStatus: storedStatus,
+      taskWorkSeconds: finiteNumber(metadata.taskWorkSeconds),
+      taskWorkMinutes: finiteNumber(metadata.taskWorkMinutes),
+      taskCostCoinUnits: finiteNumber(metadata.taskCostCoinUnits),
+      taskCostCoins: finiteNumber(metadata.taskCostCoins),
+      appliedCoinUnitsPerSecond: finiteNumber(metadata.appliedCoinUnitsPerSecond),
+      appliedHourlyRateCoinUnits: finiteNumber(metadata.appliedHourlyRateCoinUnits),
+      appliedRate: finiteNumber(metadata.appliedRate),
+    };
     if (
-      event.type === 'TASK_RESUMED' ||
-      (event.type === 'MANAGER_REPLY' && jsonObject(event.payload ?? null).decision === 'CONTINUE')
+      storedStatus !== 'CALCULATED' ||
+      (stored.taskWorkSeconds !== null &&
+        stored.taskWorkMinutes !== null &&
+        stored.taskCostCoinUnits !== null &&
+        stored.taskCostCoins !== null &&
+        stored.appliedRate !== null)
     )
-      activeSince = event.createdAt;
-    if (event.type === 'TASK_PAUSED' && activeSince) {
-      milliseconds += Math.max(0, event.createdAt.getTime() - activeSince.getTime());
-      activeSince = null;
-    }
-    if (event.type === 'TASK_COMPLETED' && activeSince) {
-      milliseconds += Math.max(0, event.createdAt.getTime() - activeSince.getTime());
-      activeSince = null;
-    }
+      return stored;
+    return {
+      ...stored,
+      costStatus: 'DATA_INCOMPLETE',
+      taskCostCoinUnits: null,
+      taskCostCoins: null,
+    };
   }
-  if (activeSince) milliseconds += Math.max(0, completedAt.getTime() - activeSince.getTime());
-  return Math.round(milliseconds / 60_000);
+  return calculateTaskCostSnapshot({
+    startedAt,
+    completedAt,
+    events: events.filter((event) => event.taskId === taskId),
+    coinUnitsPerSecond: null,
+  });
+}
+
+function costStatusValue(value: unknown): TaskCostStatus | null {
+  return ['CALCULATED', 'RATE_NOT_AVAILABLE', 'DATA_INCOMPLETE'].includes(String(value))
+    ? (value as TaskCostStatus)
+    : null;
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function durationMinutes(start: Date, finish: Date | null) {
@@ -525,6 +576,184 @@ function deduplicateFrames(frames: TimelineFrame[]) {
   });
 }
 
+function addTaskSectionFrames(
+  frames: TimelineFrame[],
+  owner: ShiftOwner,
+  taskMap: Map<string, TimelineTask>,
+  artifacts: TimelineArtifact[],
+  taskEvents: Array<{ taskId: string | null; type: string; createdAt: Date }>,
+) {
+  const result: TimelineFrame[] = [];
+  const seenTasks = new Set<string>();
+  let previousTaskId: string | null = null;
+
+  for (const frame of frames) {
+    const taskId = frame.task?.id ?? null;
+    const task = taskId ? taskMap.get(taskId) : null;
+    if (!taskId || !task) {
+      result.push(frame);
+      continue;
+    }
+
+    if (!seenTasks.has(taskId)) {
+      result.push(taskSectionStartFrame(task, owner, frame.occurredAt));
+      seenTasks.add(taskId);
+    } else if (previousTaskId && previousTaskId !== taskId && frame.kind === 'TASK_RESUMED') {
+      result.push(taskSectionReturnFrame(task, owner, frame));
+    }
+
+    result.push(frame);
+    if (frame.kind === 'TASK_COMPLETED') {
+      const startedAt =
+        task.startedAt ??
+        taskEvents.find((event) => event.taskId === taskId && event.type === 'TASK_STARTED')
+          ?.createdAt ??
+        frame.occurredAt;
+      const taskArtifacts = artifacts.filter(
+        (artifact) =>
+          artifact.taskId === taskId &&
+          artifact.uploadedBy === owner.id &&
+          artifact.createdAt >= startedAt &&
+          artifact.createdAt <= frame.occurredAt,
+      );
+      const pauseCount = taskEvents.filter(
+        (event) =>
+          event.taskId === taskId &&
+          event.type === 'TASK_PAUSED' &&
+          event.createdAt >= startedAt &&
+          event.createdAt <= frame.occurredAt,
+      ).length;
+      result.push(
+        taskSectionSummaryFrame(task, owner, frame, startedAt, taskArtifacts.length, pauseCount),
+      );
+    }
+    previousTaskId = taskId;
+  }
+
+  return result;
+}
+
+function taskSectionStartFrame(task: TimelineTask, owner: ShiftOwner, occurredAt: Date) {
+  return {
+    id: `task-section-start:${task.id}`,
+    kind: 'TASK_SECTION_START',
+    occurredAt,
+    title: 'Новая задача',
+    description: task.title,
+    task: { id: task.id, title: task.title },
+    artifact: null,
+    reason: null,
+    taskDurationMinutes: null,
+    taskCoins: null,
+    taskCoinsState: 'PENDING' as const,
+    metadata: taskSectionMetadata(task, owner, {
+      startedAt: task.startedAt ?? occurredAt,
+    }),
+  } satisfies TimelineFrame;
+}
+
+function taskSectionReturnFrame(task: TimelineTask, owner: ShiftOwner, frame: TimelineFrame) {
+  return {
+    id: `task-section-return:${task.id}:${frame.id}`,
+    kind: 'TASK_SECTION_RETURN',
+    occurredAt: frame.occurredAt,
+    title: 'Возврат к задаче',
+    description: task.title,
+    task: { id: task.id, title: task.title },
+    artifact: null,
+    reason: frame.reason,
+    taskDurationMinutes: null,
+    taskCoins: null,
+    taskCoinsState: 'PENDING' as const,
+    metadata: taskSectionMetadata(task, owner, { resumedAt: frame.occurredAt }),
+  } satisfies TimelineFrame;
+}
+
+function taskSectionSummaryFrame(
+  task: TimelineTask,
+  owner: ShiftOwner,
+  completedFrame: TimelineFrame,
+  startedAt: Date,
+  photoCount: number,
+  pauseCount: number,
+) {
+  return {
+    id: `task-section-summary:${task.id}`,
+    kind: 'TASK_SECTION_SUMMARY',
+    occurredAt: completedFrame.occurredAt,
+    title: 'Задача выполнена',
+    description: task.title,
+    task: { id: task.id, title: task.title },
+    artifact: null,
+    reason: null,
+    taskDurationMinutes: completedFrame.taskDurationMinutes,
+    taskCoins: completedFrame.taskCoins,
+    taskCoinsState: completedFrame.taskCoinsState,
+    taskCostCoins: completedFrame.taskCostCoins ?? null,
+    appliedRate: completedFrame.appliedRate ?? null,
+    costStatus: completedFrame.costStatus ?? 'DATA_INCOMPLETE',
+    metadata: taskSectionMetadata(task, owner, {
+      startedAt,
+      completedAt: completedFrame.occurredAt,
+      photoCount,
+      pauseCount,
+    }),
+  } satisfies TimelineFrame;
+}
+
+function taskSectionMetadata(
+  task: TimelineTask,
+  owner: ShiftOwner,
+  values: Record<string, unknown>,
+) {
+  return {
+    responsibleName: displayName(owner),
+    objectName: task.object?.name ?? null,
+    location: task.location ?? null,
+    ...values,
+  };
+}
+
+function shiftSectionSummaryFrame(
+  shift: ShiftRow,
+  owner: ShiftOwner,
+  frames: TimelineFrame[],
+  artifacts: TimelineArtifact[],
+) {
+  const finishedAt = shift.finishedAt!;
+  const workPhotoCount = artifacts.filter(
+    (artifact) =>
+      artifact.uploadedBy === owner.id &&
+      artifact.createdAt >= shift.startedAt &&
+      artifact.createdAt <= finishedAt,
+  ).length;
+  return {
+    id: `shift-section-summary:${shift.id}`,
+    kind: 'SHIFT_SECTION_SUMMARY',
+    occurredAt: finishedAt,
+    title: 'Смена завершена',
+    description: displayName(owner),
+    task: null,
+    artifact: null,
+    reason: null,
+    taskDurationMinutes: null,
+    taskCoins: null,
+    taskCoinsState: 'PENDING' as const,
+    metadata: {
+      workerName: displayName(owner),
+      shiftDate: shift.startedAt,
+      startedAt: shift.startedAt,
+      finishedAt,
+      shiftDurationMinutes: durationMinutes(shift.startedAt, finishedAt),
+      completedTaskCount: shift.completedTasks.length,
+      workPhotoCount,
+      pauseCount: frames.filter((frame) => frame.kind === 'TASK_PAUSED').length,
+      shiftCoinUnits: shiftCoinUnits(shift),
+      shiftCoinsState: shift.accrual?.status ?? 'PENDING',
+    },
+  } satisfies TimelineFrame;
+}
+
 function syntheticShiftFrame(shift: ShiftRow, owner: ShiftOwner, type: 'START' | 'FINISH') {
   const finished = type === 'FINISH';
   const artifact = shift.photos.find((photo) => photo.type === type)?.artifact ?? null;
@@ -532,21 +761,14 @@ function syntheticShiftFrame(shift: ShiftRow, owner: ShiftOwner, type: 'START' |
     id: `shift-${type.toLowerCase()}:${shift.id}`,
     kind: finished ? 'SHIFT_COMPLETED' : 'WORK_SHIFT_STARTED',
     occurredAt: finished ? shift.finishedAt! : shift.startedAt,
-    title: `${firstName(owner)} ${finished ? 'завершил' : 'начал'} работу`,
-    description: finished ? 'Смена завершена' : 'Начало смены',
+    title: `${finished ? displayName(owner) : firstName(owner)} ${finished ? 'завершил' : 'начал'} работу`,
+    description: finished ? null : 'Начало смены',
     task: null,
     artifact: artifact ? artifactView(artifact) : null,
     reason: null,
     taskDurationMinutes: null,
     taskCoins: null,
     taskCoinsState: 'PENDING' as const,
-    metadata: finished
-      ? {
-          shiftDurationMinutes: durationMinutes(shift.startedAt, shift.finishedAt),
-          completedTaskCount: shift.completedTasks.length,
-          shiftCoinUnits: shiftCoinUnits(shift),
-          shiftCoinsState: shift.accrual?.status ?? 'PENDING',
-        }
-      : {},
+    metadata: {},
   } satisfies TimelineFrame;
 }

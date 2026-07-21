@@ -36,3 +36,9 @@ test('each worker card owns an independent active index', () => {
   assert.equal(store.get('worker-1', 4), 2);
   assert.equal(store.get('worker-2', 4), 0);
 });
+
+test('stable frame id preserves the selected event when virtual frames are inserted before it', () => {
+  const store = createIndexStore();
+  store.set('worker-1', 1, 'task-photo:2');
+  assert.equal(store.get('worker-1', ['shift', 'task-section-start:1', 'task-photo:2']), 2);
+});

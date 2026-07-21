@@ -375,11 +375,16 @@ test('worker task actions require an active shift before reading the task', asyn
 });
 
 test('confirmed task completion is transactional and idempotent', async () => {
-  let task = createTask({ status: 'IN_PROGRESS', assigneeId: worker.id });
+  let task = createTask({
+    status: 'IN_PROGRESS',
+    assigneeId: worker.id,
+    startedAt: new Date(Date.now() - 15 * 60_000),
+  });
   let completionEvent: { idempotencyKey?: string } | null = null;
+  const completionMetadata: Record<string, unknown>[] = [];
   let processStatus = 'ACTIVE';
   const client = {
-    event: { findUnique: async () => completionEvent },
+    event: { findUnique: async () => completionEvent, findMany: async () => [] },
     task: {
       findFirst: async () => task,
       update: async ({ data }: { data: Partial<TaskRecord> }) => (
@@ -404,9 +409,14 @@ test('confirmed task completion is transactional and idempotent', async () => {
   };
   const eventTypes: string[] = [];
   const events = {
-    createEvent: async (dto: { type: string; idempotencyKey?: string }) => {
+    createEvent: async (dto: {
+      type: string;
+      idempotencyKey?: string;
+      metadata?: Record<string, unknown>;
+    }) => {
       eventTypes.push(dto.type);
       completionEvent = { idempotencyKey: dto.idempotencyKey };
+      if (dto.metadata) completionMetadata.push(dto.metadata);
       return { id: 'event-complete' };
     },
   };
@@ -423,6 +433,9 @@ test('confirmed task completion is transactional and idempotent', async () => {
   assert.equal(task.completedWorkShiftId, 'shift-1');
   assert.equal(processStatus, 'COMPLETED');
   assert.deepEqual(eventTypes, ['TASK_COMPLETED']);
+  assert.equal(completionMetadata[0]?.costStatus, 'CALCULATED');
+  assert.equal(completionMetadata[0]?.appliedRate, 756);
+  assert.equal(typeof completionMetadata[0]?.taskCostCoins, 'number');
 });
 
 test('a shared task is atomically claimed by only one worker and starts immediately', async () => {
@@ -521,7 +534,7 @@ test('simple task completion stores the final photo before linking completion to
   };
   const writes: string[] = [];
   const client = {
-    event: { findUnique: async () => null },
+    event: { findUnique: async () => null, findMany: async () => [] },
     task: {
       findFirst: async () => task,
       updateMany: async ({ data }: { data: Partial<TaskRecord> }) => {

@@ -2792,45 +2792,104 @@ function renderAnalystTimeline(frames, shiftId, workerKey) {
     id: frame.artifact?.id ?? null,
     originalFileName: frame.artifact?.originalFileName ?? frame.title,
   }));
-  const selectedIndex = analystFrameIndexStore.get(workerKey, frames.length);
-  const slider = PhotoSlider.render(photos, {
+  const selectedIndex = analystFrameIndexStore.get(
+    workerKey,
+    frames.map((frame) => frame.id),
+  );
+  const sliderMarkup = PhotoSlider.render(photos, {
     id: `analyst-shift-${shiftId}`,
     showEmpty: false,
   });
-  const captions = frames
-    .map(
-      (frame, index) =>
-        `<div class="analystFrameCaption" data-analyst-caption="${index}" data-frame-id="${escapeHtml(frame.id)}"${index === selectedIndex ? '' : ' hidden'}><strong>${escapeHtml(frame.title)}</strong>${frame.description ? `<p>«${escapeHtml(frame.description)}»</p>` : ''}${frame.reason ? `<p><b>Причина:</b> ${escapeHtml(frame.reason)}</p>` : ''}${renderAnalystFrameFacts(frame)}<time datetime="${escapeHtml(frame.occurredAt)}">${formatAnalystTime(frame.occurredAt)}</time></div>`,
-    )
-    .join('');
-  return `<section class="analystTimeline" data-analyst-timeline data-analyst-worker-id="${escapeHtml(workerKey)}" data-initial-frame="${selectedIndex}">${slider}<div class="analystFramePosition">Кадр <span>${selectedIndex + 1}</span> из ${frames.length}</div>${captions}</section>`;
+  const slider = decorateAnalystSlides(sliderMarkup, frames);
+  return `<section class="analystTimeline" data-analyst-timeline data-analyst-worker-id="${escapeHtml(workerKey)}" data-initial-frame="${selectedIndex}">${slider}<div class="analystFramePosition">Кадр <span>${selectedIndex + 1}</span> из ${frames.length}</div></section>`;
+}
+
+function decorateAnalystSlides(sliderMarkup, frames) {
+  const template = document.createElement('template');
+  template.innerHTML = sliderMarkup;
+  const slides = template.content.querySelectorAll('[data-photo-slide]');
+  for (const [index, frame] of frames.entries()) {
+    const slide = slides[index];
+    if (!slide) continue;
+    slide.dataset.analystFrameId = frame.id;
+    if (isAnalystTaskSection(frame)) {
+      slide.classList.remove('is-event-placeholder');
+      slide.classList.add(
+        'is-virtual',
+        'is-analyst-task-section',
+        `is-${frame.kind.toLowerCase().replaceAll('_', '-')}`,
+      );
+      slide.querySelector('.analystPhotoPlaceholder')?.remove();
+      slide.querySelector('.photoLockOverlay')?.remove();
+      slide.insertAdjacentHTML('beforeend', renderAnalystTaskSection(frame));
+      continue;
+    }
+    slide.insertAdjacentHTML(
+      'beforeend',
+      renderAnalystFrameOverlay(frame, index),
+    );
+  }
+  return template.innerHTML;
+}
+
+function renderAnalystFrameOverlay(frame, index) {
+  const attributes = `class="analystFrameOverlay" data-analyst-caption="${index}" data-frame-id="${escapeHtml(frame.id)}"`;
+  const occurredAt = escapeHtml(frame.occurredAt);
+  const time = formatAnalystTime(frame.occurredAt);
+  if (frame.kind === 'TASK_COMPLETED')
+    return `<div ${attributes}><strong>Задача выполнена</strong><time datetime="${occurredAt}">Время завершения: ${time}</time></div>`;
+  if (frame.kind === 'SHIFT_COMPLETED')
+    return `<div ${attributes}><strong>${escapeHtml(frame.title)}</strong><time datetime="${occurredAt}">${time}</time></div>`;
+  return `<div ${attributes}><strong>${escapeHtml(frame.title)}</strong>${frame.description ? `<p class="analystFrameTask">«${escapeHtml(frame.description)}»</p>` : ''}${frame.reason ? `<p class="analystFrameReason"><b>Причина:</b> ${escapeHtml(frame.reason)}</p>` : ''}${renderAnalystFrameFacts(frame)}<time datetime="${occurredAt}">${time}</time></div>`;
+}
+
+function isAnalystTaskSection(frame) {
+  return [
+    'TASK_SECTION_START',
+    'TASK_SECTION_RETURN',
+    'TASK_SECTION_SUMMARY',
+    'SHIFT_SECTION_SUMMARY',
+  ].includes(frame.kind);
+}
+
+function renderAnalystTaskSection(frame) {
+  const metadata = frame.metadata ?? {};
+  const title = frame.description || frame.task?.title || 'Задача';
+  const place = [metadata.objectName, metadata.location].filter(Boolean).join(' / ');
+  const responsible = metadata.responsibleName
+    ? `<p class="analystSectionWide">Ответственный: ${escapeHtml(metadata.responsibleName)}</p>`
+    : '';
+  const placeLine = place
+    ? `<p class="analystSectionPlace analystSectionWide">${escapeHtml(place)}</p>`
+    : '';
+  if (frame.kind === 'SHIFT_SECTION_SUMMARY') {
+    const accrual = Number.isFinite(metadata.shiftCoinUnits)
+      ? formatAnalystCoins(metadata.shiftCoinUnits)
+      : 'ожидает расчёта';
+    return `<div class="analystTaskSectionCard analystShiftSectionSummary" data-analyst-caption data-frame-id="${escapeHtml(frame.id)}"><span class="analystSectionEyebrow">Смена завершена</span><strong>${escapeHtml(metadata.workerName || frame.description || 'Сотрудник')}</strong>${metadata.shiftDate ? `<p class="analystShiftSectionDate">${formatAnalystShiftDate(metadata.shiftDate)}</p>` : ''}<div class="analystSectionFacts">${metadata.startedAt ? `<p>Начало: ${formatAnalystTime(metadata.startedAt)}</p>` : ''}${metadata.finishedAt ? `<p>Завершено: ${formatAnalystTime(metadata.finishedAt)}</p>` : ''}${Number.isFinite(metadata.shiftDurationMinutes) ? `<p>Продолжительность: ${formatAnalystDuration(metadata.shiftDurationMinutes)}</p>` : ''}${Number.isFinite(metadata.completedTaskCount) ? `<p>Выполнено задач: ${metadata.completedTaskCount}</p>` : ''}${Number.isFinite(metadata.workPhotoCount) ? `<p>Фотографий: ${metadata.workPhotoCount}</p>` : ''}${Number.isFinite(metadata.pauseCount) ? `<p>Пауз: ${metadata.pauseCount}</p>` : ''}<p>Начислено: ${escapeHtml(accrual)}</p></div></div>`;
+  }
+  if (frame.kind === 'TASK_SECTION_SUMMARY') {
+    const cost = analystTaskCostLabel(frame);
+    return `<div class="analystTaskSectionCard analystTaskSectionSummary" data-analyst-caption data-frame-id="${escapeHtml(frame.id)}"><span class="analystSectionBadge">✓ Готово</span><span class="analystSectionEyebrow">Задача выполнена</span><strong>${escapeHtml(title)}</strong><div class="analystSectionFacts analystSectionSummaryFacts">${responsible}${placeLine}${metadata.startedAt ? `<p>Начало: ${formatAnalystTime(metadata.startedAt)}</p>` : ''}${metadata.completedAt ? `<p>Завершено: ${formatAnalystTime(metadata.completedAt)}</p>` : ''}${Number.isFinite(frame.taskDurationMinutes) ? `<p>Время: ${formatAnalystDuration(frame.taskDurationMinutes)}</p>` : ''}${Number.isFinite(metadata.photoCount) ? `<p>Фотографий: ${metadata.photoCount}</p>` : ''}${Number.isFinite(metadata.pauseCount) ? `<p>Пауз: ${metadata.pauseCount}</p>` : ''}<p class="analystSectionWide">Стоимость: ${escapeHtml(cost)}</p></div></div>`;
+  }
+  const returned = frame.kind === 'TASK_SECTION_RETURN';
+  const eventTime = returned ? metadata.resumedAt : metadata.startedAt;
+  return `<div class="analystTaskSectionCard ${returned ? 'analystTaskSectionReturn' : 'analystTaskSectionStart'}" data-analyst-caption data-frame-id="${escapeHtml(frame.id)}"><span class="analystSectionEyebrow">${returned ? 'Возврат к задаче' : 'Новая задача'}</span><strong>${escapeHtml(title)}</strong>${placeLine}<div class="analystSectionFacts">${eventTime ? `<p>${returned ? 'Продолжение' : 'Начало'}: ${formatAnalystTime(eventTime)}</p>` : ''}${responsible}${returned && frame.reason ? `<p class="analystSectionWide">Причина: ${escapeHtml(frame.reason)}</p>` : ''}</div></div>`;
+}
+
+function analystTaskCostLabel(frame) {
+  if (frame.costStatus === 'CALCULATED' && Number.isFinite(frame.taskCostCoins))
+    return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(frame.taskCostCoins)} монет`;
+  if (frame.costStatus === 'RATE_NOT_AVAILABLE') return 'нет данных о тарифе';
+  if (frame.costStatus === 'DATA_INCOMPLETE') return 'недостаточно данных';
+  return 'нет данных о тарифе';
 }
 
 function renderAnalystFrameFacts(frame) {
   const facts = [];
   if (Number.isFinite(frame.taskDurationMinutes))
     facts.push(`Время выполнения: ${formatAnalystDuration(frame.taskDurationMinutes)}`);
-  if (frame.kind === 'TASK_COMPLETED')
-    facts.push(
-      Number.isFinite(frame.taskCoins)
-        ? `Стоимость: ${formatAnalystCoins(frame.taskCoins)}`
-        : 'Стоимость рассчитывается',
-    );
-  if (frame.kind === 'SHIFT_COMPLETED') {
-    const metadata = frame.metadata ?? {};
-    if (Number.isFinite(metadata.shiftDurationMinutes))
-      facts.push(
-        `Продолжительность смены: ${formatAnalystDuration(metadata.shiftDurationMinutes)}`,
-      );
-    if (Number.isFinite(metadata.completedTaskCount))
-      facts.push(`Завершено задач: ${metadata.completedTaskCount}`);
-    facts.push(
-      Number.isFinite(metadata.shiftCoinUnits)
-        ? `Начислено: ${formatAnalystCoins(metadata.shiftCoinUnits)}`
-        : 'Начисление ожидается',
-    );
-  }
-  return facts.map((fact) => `<p>${escapeHtml(fact)}</p>`).join('');
+  return facts.map((fact) => `<p class="analystFrameFact">${escapeHtml(fact)}</p>`).join('');
 }
 
 function bindAnalystTimelines(root) {
@@ -2858,14 +2917,12 @@ function updateAnalystTimeline(timeline) {
   if (!slides.length) return;
   const index = AnalystTimeline.findActiveIndex(slides, carousel.scrollLeft, carousel.clientWidth);
   if (index < 0) return;
-  for (const caption of timeline.querySelectorAll('[data-analyst-caption]'))
-    caption.hidden = Number(caption.dataset.analystCaption) !== index;
   const counter = timeline.querySelector('.analystFramePosition span');
   if (counter) counter.textContent = String(index + 1);
   const workerId = timeline.dataset.analystWorkerId;
-  const captions = timeline.querySelectorAll('[data-analyst-caption]');
-  analystFrameIndexStore.set(workerId, index);
-  timeline.dataset.initialFrame = String(Math.min(index, captions.length - 1));
+  const frameCount = timeline.querySelectorAll('[data-analyst-caption]').length;
+  analystFrameIndexStore.set(workerId, index, slides[index]?.dataset.analystFrameId ?? null);
+  timeline.dataset.initialFrame = String(Math.min(index, frameCount - 1));
 }
 
 async function loadAnalystHistory() {
@@ -2952,6 +3009,16 @@ function formatAnalystTime(value) {
   return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(
     new Date(value),
   );
+}
+
+function formatAnalystShiftDate(value) {
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  })
+    .format(new Date(value))
+    .replace(/\s*г\.$/, '');
 }
 
 function formatAnalystDuration(minutes) {

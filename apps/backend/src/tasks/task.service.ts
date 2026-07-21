@@ -17,6 +17,7 @@ import { CreateTaskDto } from './dto/create-task.dto.js';
 import { TaskRecord } from './task-record.js';
 import { TaskRepository } from './task.repository.js';
 import { ActiveShiftAccessService } from '../work-shifts/active-shift-access.service.js';
+import { calculateCurrentTaskCostSnapshot } from './task-cost-policy.js';
 
 const defaultTaskListLimit = 100;
 
@@ -368,6 +369,12 @@ export class TaskService {
             },
           );
           const completedAt = new Date();
+          const taskCost = await this.taskCostSnapshot(
+            client,
+            task.id,
+            task.startedAt,
+            completedAt,
+          );
           const completed = await client.task.updateMany({
             where: {
               id: task.id,
@@ -408,6 +415,7 @@ export class TaskService {
                 objectName: task.object?.name ?? null,
                 taskTitle: task.title,
                 completionPhotoId: artifact.id,
+                ...taskCost,
               },
             },
             client,
@@ -504,6 +512,12 @@ export class TaskService {
         });
         if (!shift) throw new BadRequestException('ACTIVE_SHIFT_REQUIRED');
         const completedAt = new Date();
+        const taskCost = await this.taskCostSnapshot(
+          client,
+          current.id,
+          current.startedAt,
+          completedAt,
+        );
         const result = await client.task.update({
           where: { id: task.id },
           data: { status: 'COMPLETED', completedAt, completedWorkShiftId: shift.id },
@@ -523,7 +537,7 @@ export class TaskService {
             workShiftId: shift.id,
             idempotencyKey,
             payload: { action: 'TASK_COMPLETED', status: result.status },
-            metadata: snapshot as Prisma.InputJsonObject,
+            metadata: { ...snapshot, ...taskCost } as Prisma.InputJsonObject,
           },
           client,
         );
@@ -618,6 +632,24 @@ export class TaskService {
       : null;
     if (!task || !artifact) throw new ConflictException('Completion operation is inconsistent');
     return { task, artifact };
+  }
+
+  private async taskCostSnapshot(
+    client: Prisma.TransactionClient,
+    taskId: string,
+    startedAt: Date | null,
+    completedAt: Date,
+  ) {
+    const events = await client.event.findMany({
+      where: {
+        taskId,
+        type: { in: ['TASK_STARTED', 'TASK_PAUSED', 'TASK_RESUMED', 'MANAGER_REPLY'] },
+        createdAt: { lte: completedAt },
+      },
+      select: { type: true, createdAt: true, payload: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+    return calculateCurrentTaskCostSnapshot({ startedAt, completedAt, events });
   }
 
   private async prepareWorkerTransition(
