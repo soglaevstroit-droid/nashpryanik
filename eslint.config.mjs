@@ -11,6 +11,8 @@ export default [
       '**/build/**',
       'coverage/**',
       '.dart_tool/**',
+      '.runtime/**',
+      'backup/**',
     ],
   },
   js.configs.recommended,

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { NotFoundException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { rolesMetadataKey } from '../auth/decorators/roles.decorator.js';
+import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { AnalystController } from './analyst.controller.js';
 import { AnalystService } from './analyst.service.js';
 
@@ -9,6 +11,70 @@ const start = new Date('2026-07-21T08:00:00.000Z');
 const finish = new Date('2026-07-21T12:00:00.000Z');
 const worker = { id: 'worker-1', email: 'work', name: 'Илья Н.' };
 const restingWorker = { id: 'worker-2', email: 'work2', name: 'Антон К.' };
+
+function summaryFixture(
+  options: {
+    workers?: Array<{ id: string; isActive?: boolean; openingBalanceCoinUnits: number }>;
+    accruals?: Array<{
+      workerId: string;
+      status: 'APPROVED' | 'PENDING_APPROVAL' | 'REJECTED';
+      standardCoinUnits: number;
+      calculatedOvertimeCoinUnits: number;
+      analystFinalOvertimeUnits: number | null;
+      overtimeDecision: 'PENDING' | 'APPROVED' | 'ADJUSTED' | 'REJECTED';
+      workShift: { status: 'ACTIVE' | 'FINISHED'; finishedAt: Date | null };
+    }>;
+    activeShifts?: Array<{ userId: string; startedAt: Date }>;
+  } = {},
+) {
+  const calls = { users: 0, accruals: 0, shifts: 0 };
+  const workers = options.workers ?? [];
+  const accruals = options.accruals ?? [];
+  const activeShifts = options.activeShifts ?? [];
+  const database = {
+    user: {
+      findMany: async () => {
+        calls.users += 1;
+        return workers.map((worker) => ({ ...worker, isActive: worker.isActive ?? true }));
+      },
+    },
+    shiftAccrual: {
+      findMany: async (query: { where: { status: string } }) => {
+        calls.accruals += 1;
+        return accruals.filter((accrual) => accrual.status === query.where.status);
+      },
+    },
+    workShift: {
+      findMany: async (query: { where: { startedAt: { lte: Date } } }) => {
+        calls.shifts += 1;
+        return activeShifts.filter((shift) => shift.startedAt <= query.where.startedAt.lte);
+      },
+    },
+  };
+  return { service: new AnalystService(database as never), calls };
+}
+
+function summaryAccrual(
+  workerId: string,
+  finishedAt: string,
+  options: {
+    status?: 'APPROVED' | 'PENDING_APPROVAL' | 'REJECTED';
+    standard?: number;
+    overtime?: number;
+    finalOvertime?: number | null;
+    overtimeDecision?: 'PENDING' | 'APPROVED' | 'ADJUSTED' | 'REJECTED';
+  } = {},
+) {
+  return {
+    workerId,
+    status: options.status ?? ('APPROVED' as const),
+    standardCoinUnits: options.standard ?? 0,
+    calculatedOvertimeCoinUnits: options.overtime ?? 0,
+    analystFinalOvertimeUnits: options.finalOvertime ?? null,
+    overtimeDecision: options.overtimeDecision ?? ('PENDING' as const),
+    workShift: { status: 'FINISHED' as const, finishedAt: new Date(finishedAt) },
+  };
+}
 
 function artifact(id: string, createdAt: Date, purpose?: string, taskId = 'task-1') {
   return {
@@ -109,6 +175,7 @@ function fixture(
     multipleTasks?: boolean;
     legacyCost?: boolean;
     pendingAccrual?: boolean;
+    progressComment?: string;
   } = {},
 ) {
   const progress = artifact('progress', new Date('2026-07-21T09:30:00.000Z'));
@@ -128,7 +195,10 @@ function fixture(
   const standardTimeline = [
     event('shift-start', 'WORK_SHIFT_STARTED', start, { workShiftId: 'shift-1' }),
     event('task-start', 'TASK_STARTED', new Date('2026-07-21T09:00:00.000Z')),
-    event('photo', 'PHOTO_UPLOADED', progress.createdAt, { artifacts: [progress] }),
+    event('photo', 'PHOTO_UPLOADED', progress.createdAt, {
+      artifacts: [progress],
+      metadata: options.progressComment ? { comment: options.progressComment } : undefined,
+    }),
     event('pause', 'TASK_PAUSED', new Date('2026-07-21T10:00:00.000Z'), {
       reason: 'Жду материал',
     }),
@@ -282,6 +352,20 @@ test('timeline is chronological and each process photo is a separate frame', asy
   );
   assert.equal(entry.timeline[3].artifact?.id, 'progress');
   assert.equal(new Set(entry.timeline.map((frame) => frame.id)).size, entry.timeline.length);
+});
+
+test('analyst live and history expose the same per-artifact photo comment and legacy null', async () => {
+  const commented = fixture({ progressComment: 'Кабель уложен до коробки' });
+  const [live] = await commented.getLiveWorkers(new Date('2026-07-21T12:00:00.000Z'));
+  const history = await commented.getShift('shift-1');
+  const livePhoto = live.timeline.find((frame) => frame.kind === 'TASK_PHOTO_ADDED');
+  const historyPhoto = history.timeline.find((frame) => frame.kind === 'TASK_PHOTO_ADDED');
+  assert.equal(livePhoto?.artifact?.id, 'progress');
+  assert.equal(livePhoto?.comment, 'Кабель уложен до коробки');
+  assert.equal(historyPhoto?.comment, livePhoto?.comment);
+
+  const [legacy] = await fixture().getLiveWorkers(new Date('2026-07-21T12:00:00.000Z'));
+  assert.equal(legacy.timeline.find((frame) => frame.kind === 'TASK_PHOTO_ADDED')?.comment, null);
 });
 
 test('task section frames have stable ids, no Artifact and correct summary metrics', async () => {
@@ -480,4 +564,157 @@ test('live endpoint query count stays constant as worker count grows', async () 
   const result = await new AnalystService(database as never).getLiveWorkers(finish);
   assert.equal(result.length, 50);
   assert.deepEqual(calls, { users: 1, shifts: 1, tasks: 1, events: 0 });
+});
+
+test('summary totals only approved historical accruals and applies finalized overtime adjustments', async () => {
+  const now = new Date('2026-07-21T12:00:00.000Z');
+  const { service } = summaryFixture({
+    workers: [{ id: 'worker-1', openingBalanceCoinUnits: 0 }],
+    accruals: [
+      summaryAccrual('worker-1', '2026-07-21T10:00:00.000Z', {
+        standard: 10_025,
+        overtime: 500,
+        finalOvertime: 250,
+        overtimeDecision: 'ADJUSTED',
+      }),
+      summaryAccrual('worker-1', '2026-07-20T10:00:00.000Z', {
+        standard: 2_000,
+        overtime: 700,
+        overtimeDecision: 'REJECTED',
+      }),
+      summaryAccrual('worker-1', '2026-07-21T11:00:00.000Z', {
+        status: 'PENDING_APPROVAL',
+        standard: 90_000,
+      }),
+      summaryAccrual('worker-1', '2026-07-21T11:30:00.000Z', {
+        status: 'REJECTED',
+        standard: 80_000,
+      }),
+    ],
+  });
+
+  const result = await service.getSummary(now);
+
+  assert.equal(result.totalEarnedCoins, 122.75);
+  assert.equal(result.earnedTodayCoins, 102.75);
+});
+
+test('summary balance is the existing opening plus approved standard balance for active workers', async () => {
+  const { service } = summaryFixture({
+    workers: [
+      { id: 'worker-1', openingBalanceCoinUnits: 10_025 },
+      { id: 'worker-2', openingBalanceCoinUnits: 5_000 },
+      { id: 'inactive-worker', isActive: false, openingBalanceCoinUnits: 12_000 },
+    ],
+    accruals: [
+      summaryAccrual('worker-1', '2026-07-21T10:00:00.000Z', { standard: 4_000 }),
+      summaryAccrual('worker-2', '2026-07-20T10:00:00.000Z', { standard: 3_000 }),
+      summaryAccrual('inactive-worker', '2026-07-21T09:00:00.000Z', { standard: 8_000 }),
+    ],
+  });
+
+  const result = await service.getSummary(new Date('2026-07-21T12:00:00.000Z'));
+
+  assert.equal(result.currentWorkerBalanceCoins, 220.25);
+});
+
+test('today includes approved finished shifts and live open shifts but excludes yesterday and future', async () => {
+  const now = new Date('2026-07-21T12:00:00.000Z');
+  const { service } = summaryFixture({
+    workers: [{ id: 'worker-1', openingBalanceCoinUnits: 0 }],
+    accruals: [
+      summaryAccrual('worker-1', '2026-07-21T10:00:00.000Z', { standard: 4_000 }),
+      summaryAccrual('worker-1', '2026-07-20T23:59:59.999Z', { standard: 8_000 }),
+      summaryAccrual('worker-1', '2026-07-21T13:00:00.000Z', { standard: 16_000 }),
+    ],
+    activeShifts: [
+      { userId: 'worker-1', startedAt: new Date('2026-07-21T11:00:00.000Z') },
+      { userId: 'worker-1', startedAt: new Date('2026-07-21T13:00:00.000Z') },
+    ],
+  });
+
+  const result = await service.getSummary(now);
+
+  assert.equal(result.earnedTodayCoins, 796);
+  assert.deepEqual(result.live, {
+    coinUnitsPerSecond: 21,
+    dailyStandardLimitCoinUnits: 700_000,
+    activeShifts: [{ startedAt: new Date('2026-07-21T11:00:00.000Z') }],
+  });
+});
+
+test('summary exposes all current worker shift starts for one local multi-shift projection', async () => {
+  const now = new Date('2026-07-21T12:00:00.000Z');
+  const { service } = summaryFixture({
+    workers: [
+      { id: 'worker-1', openingBalanceCoinUnits: 0 },
+      { id: 'worker-2', openingBalanceCoinUnits: 0 },
+    ],
+    activeShifts: [
+      { userId: 'worker-1', startedAt: new Date('2026-07-21T11:59:50.000Z') },
+      { userId: 'worker-2', startedAt: new Date('2026-07-21T11:59:55.000Z') },
+    ],
+  });
+
+  const result = await service.getSummary(now);
+
+  assert.equal(result.earnedTodayCoins, 3.15);
+  assert.deepEqual(
+    result.live.activeShifts.map((shift) => shift.startedAt),
+    [new Date('2026-07-21T11:59:50.000Z'), new Date('2026-07-21T11:59:55.000Z')],
+  );
+});
+
+test('open shift crossing UTC midnight keeps the existing whole-shift live calculation', async () => {
+  const now = new Date('2026-07-21T00:30:00.000Z');
+  const { service } = summaryFixture({
+    workers: [{ id: 'worker-1', openingBalanceCoinUnits: 0 }],
+    activeShifts: [{ userId: 'worker-1', startedAt: new Date('2026-07-20T23:30:00.000Z') }],
+  });
+
+  const result = await service.getSummary(now);
+
+  assert.equal(result.earnedTodayCoins, 756);
+});
+
+test('summary uses three constant-size queries and an empty database returns exact zeros', async () => {
+  const { service, calls } = summaryFixture();
+
+  const result = await service.getSummary(new Date('2026-07-21T12:00:00.000Z'));
+
+  assert.deepEqual(result, {
+    totalEarnedCoins: 0,
+    currentWorkerBalanceCoins: 0,
+    earnedTodayCoins: 0,
+    calculatedAt: new Date('2026-07-21T12:00:00.000Z'),
+    live: {
+      coinUnitsPerSecond: 21,
+      dailyStandardLimitCoinUnits: 700_000,
+      activeShifts: [],
+    },
+  });
+  assert.deepEqual(calls, { users: 1, accruals: 1, shifts: 1 });
+});
+
+test('analyst summary route allows ANALYST and rejects WORKER and FOREMAN with HTTP 403', () => {
+  const guard = new RolesGuard(new Reflector());
+  const handler = AnalystController.prototype.summary as () => unknown;
+  const createContext = (role: 'ANALYST' | 'WORKER' | 'FOREMAN') =>
+    ({
+      getHandler: () => handler,
+      getClass: () => AnalystController,
+      switchToHttp: () => ({
+        getRequest: () => ({
+          user: { id: `${role.toLowerCase()}-1`, email: role.toLowerCase(), role },
+        }),
+      }),
+    }) as unknown as ExecutionContext;
+
+  assert.equal(guard.canActivate(createContext('ANALYST')), true);
+  for (const role of ['WORKER', 'FOREMAN'] as const) {
+    assert.throws(
+      () => guard.canActivate(createContext(role)),
+      (error) => error instanceof ForbiddenException && error.getStatus() === 403,
+    );
+  }
 });

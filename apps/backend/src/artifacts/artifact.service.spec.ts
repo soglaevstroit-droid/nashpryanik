@@ -64,7 +64,7 @@ function createRepository(seed: ArtifactRecord[] = []): ArtifactRepository {
   > = {
     create: async (data) => {
       const artifact = createArtifact({
-        id: `artifact-${artifacts.length + 1}`,
+        id: data.id ?? `artifact-${artifacts.length + 1}`,
         eventId: data.eventId,
         taskId: data.taskId ?? null,
         taskStepId: data.taskStepId ?? null,
@@ -102,10 +102,14 @@ function createRepository(seed: ArtifactRecord[] = []): ArtifactRepository {
   return repository as ArtifactRepository;
 }
 
-function createEventService(eventTypes: string[]): EventService {
+function createEventService(
+  eventTypes: string[],
+  createdEvents: Array<Parameters<EventService['createEvent']>[0]> = [],
+): EventService {
   return {
     createEvent: async (dto) => {
       eventTypes.push(dto.type);
+      createdEvents.push(dto);
 
       return {
         id: `event-${eventTypes.length}`,
@@ -175,6 +179,107 @@ test('uploads photo, stores object, creates PHOTO_UPLOADED event and artifact', 
   assert.equal(artifact.taskStepId, 'step-1');
   assert.deepEqual(eventTypes, ['PHOTO_UPLOADED']);
   assert.deepEqual(storageEvents, ['upload:photos/worker-1/2026-07-09/progress.jpg']);
+});
+
+test('photo comment is normalized and atomically linked to the created artifact event', async () => {
+  const eventTypes: string[] = [];
+  const createdEvents: Array<Parameters<EventService['createEvent']>[0]> = [];
+  const service = new ArtifactService(
+    createRepository(),
+    createStorage([]),
+    createEventService(eventTypes, createdEvents),
+  );
+
+  const artifact = await service.uploadPhoto(
+    user,
+    {
+      taskId: 'task-1',
+      operationId: 'commented-photo',
+      comment: '  Кабель уложен ✨\r\nДо коробки  ',
+    },
+    createFile(),
+  );
+
+  assert.equal(createdEvents[0]?.entityId, artifact.id);
+  assert.deepEqual(createdEvents[0]?.payload, {
+    artifactId: artifact.id,
+    artifactType: 'PHOTO',
+    taskId: 'task-1',
+    taskStepId: null,
+    workerId: user.id,
+    originalFileName: 'progress.jpg',
+    mimeType: 'image/jpeg',
+    fileSize: createFile().size,
+    storageKey: 'photos/worker-1/2026-07-09/progress.jpg',
+  });
+  assert.deepEqual(createdEvents[0]?.metadata, {
+    source: 'artifact-foundation',
+    comment: 'Кабель уложен ✨\nДо коробки',
+  });
+});
+
+test('missing and whitespace-only photo comments are stored as null', async () => {
+  const createdEvents: Array<Parameters<EventService['createEvent']>[0]> = [];
+  const service = new ArtifactService(
+    createRepository(),
+    createStorage([]),
+    createEventService([], createdEvents),
+  );
+
+  await service.uploadPhoto(user, { taskId: 'task-1' }, createFile());
+  await service.uploadPhoto(user, { taskId: 'task-1', comment: ' \n ' }, createFile());
+
+  assert.deepEqual(
+    createdEvents.map((event) => (event.metadata as { comment: string | null }).comment),
+    [null, null],
+  );
+});
+
+test('separate photos preserve separate comments in upload order', async () => {
+  const createdEvents: Array<Parameters<EventService['createEvent']>[0]> = [];
+  const service = new ArtifactService(
+    createRepository(),
+    createStorage([]),
+    createEventService([], createdEvents),
+  );
+
+  await service.uploadPhoto(user, { taskId: 'task-1', comment: 'Первый кадр' }, createFile());
+  await service.uploadPhoto(user, { taskId: 'task-1', comment: 'Второй кадр' }, createFile());
+
+  assert.deepEqual(
+    createdEvents.map((event) => (event.metadata as { comment: string }).comment),
+    ['Первый кадр', 'Второй кадр'],
+  );
+  assert.notEqual(createdEvents[0]?.entityId, createdEvents[1]?.entityId);
+});
+
+test('photo comment over 200 Unicode characters is rejected before storage', async () => {
+  const storageEvents: string[] = [];
+  const service = new ArtifactService(
+    createRepository(),
+    createStorage(storageEvents),
+    createEventService([]),
+  );
+
+  await assert.rejects(
+    service.uploadPhoto(user, { taskId: 'task-1', comment: '🙂'.repeat(201) }, createFile()),
+    BadRequestException,
+  );
+  assert.deepEqual(storageEvents, []);
+});
+
+test('failed photo storage creates no event or standalone comment', async () => {
+  const eventTypes: string[] = [];
+  const storage = createStorage([]);
+  storage.uploadPhoto = async () => {
+    throw new Error('Storage unavailable');
+  };
+  const service = new ArtifactService(createRepository(), storage, createEventService(eventTypes));
+
+  await assert.rejects(
+    service.uploadPhoto(user, { taskId: 'task-1', comment: 'Не потерять' }, createFile()),
+  );
+  assert.deepEqual(eventTypes, []);
 });
 
 test('gets photo download stream', async () => {
@@ -517,7 +622,12 @@ test('repeated photo operation returns existing artifact without storing a dupli
   );
   const result = await service.uploadPhoto(
     user,
-    { taskId: 'task-1', taskStepId: 'step-1', operationId: 'same-photo' },
+    {
+      taskId: 'task-1',
+      taskStepId: 'step-1',
+      operationId: 'same-photo',
+      comment: 'Повтор не должен изменить исходный комментарий',
+    },
     createFile(),
   );
   assert.equal(result.id, existing.id);

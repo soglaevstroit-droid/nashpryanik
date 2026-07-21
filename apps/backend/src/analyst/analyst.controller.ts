@@ -10,6 +10,11 @@ import { AnalystService } from './analyst.service.js';
 export class AnalystController {
   constructor(private readonly analyst: AnalystService) {}
 
+  @Get('summary')
+  summary() {
+    return this.analyst.getSummary();
+  }
+
   @Get('workers/live')
   live() {
     return this.analyst.getLiveWorkers();

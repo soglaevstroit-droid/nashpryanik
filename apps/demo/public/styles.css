@@ -8,6 +8,7 @@
     'Segoe UI',
     sans-serif;
   --bg: #f2f2f2;
+  --app-background-fallback: #0d0f12;
   --surface: #ffffff;
   --text: #111111;
   --muted: #8b8b8b;
@@ -46,7 +47,7 @@
 
 html {
   min-height: 100%;
-  background: var(--bg);
+  background: var(--app-background-fallback);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
@@ -57,7 +58,7 @@ body {
   min-height: 100svh;
   min-height: 100dvh;
   overflow-x: clip;
-  background: var(--bg);
+  background: var(--app-background-fallback);
   color: var(--text);
 }
 
@@ -91,13 +92,35 @@ button:active {
 }
 
 .appShell {
+  isolation: isolate;
   position: relative;
   width: 100%;
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
   overflow-x: clip;
-  background: var(--bg);
+  background: transparent;
+}
+
+.appShell::before {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background-color: var(--app-background-fallback);
+  background-image:
+    linear-gradient(rgb(12 13 16 / 10%), rgb(12 13 16 / 10%)),
+    url('/assets/app-background.webp?v=fon2');
+  background-image:
+    linear-gradient(rgb(12 13 16 / 10%), rgb(12 13 16 / 10%)),
+    image-set(
+      url('/assets/app-background.avif?v=fon2') type('image/avif') 1x,
+      url('/assets/app-background.webp?v=fon2') type('image/webp') 1x
+    );
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
 }
 
 .screen {
@@ -562,6 +585,13 @@ p {
 
 .sectionTitle {
   margin-bottom: 14px;
+}
+
+.sectionTitle h1,
+.pageHead h1,
+.objectBlock > h2 {
+  color: #fff;
+  text-shadow: 0 1px 5px rgb(0 0 0 / 55%);
 }
 
 .sectionTitle h1,
@@ -1989,8 +2019,82 @@ p {
   font-weight: 700;
 }
 
-.workspaceScreen.analyst-mode .workerTop {
+#workspaceScreen.analyst-mode .workerTop {
   display: none;
+}
+
+.analystTop {
+  display: none;
+}
+
+#workspaceScreen.analyst-mode .analystTop {
+  display: grid;
+  gap: clamp(14px, 4.5vw, 20px);
+  margin-bottom: clamp(20px, 6vw, 28px);
+  padding: clamp(20px, 6vw, 30px) var(--card-padding) clamp(18px, 5vw, 24px);
+  border-radius: clamp(22px, 7vw, 28px);
+  background: var(--surface);
+  box-shadow: 0 18px 46px rgb(17 17 17 / 7%);
+}
+
+.analystTopMain {
+  min-width: 0;
+}
+
+.analystTop .workerPerson strong {
+  display: block;
+  margin-top: 4px;
+  color: #070707;
+  font-size: clamp(20px, 6.3vw, 25px);
+  line-height: 1;
+}
+
+.analystTop .workerPerson small {
+  color: var(--muted);
+}
+
+.analystSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(8px, 3vw, 18px);
+  min-width: 0;
+}
+
+.analystSummaryGrid > div {
+  min-width: 0;
+}
+
+.analystSummaryGrid small {
+  display: block;
+  margin-bottom: 8px;
+  color: #7f7f8b;
+  font-size: clamp(9px, 2.9vw, 13px);
+  line-height: 1.15;
+}
+
+.analystSummaryGrid strong {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  color: #080808;
+  font-size: clamp(14px, 4.5vw, 22px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.analystSummaryGrid span.is-live {
+  color: var(--green);
+}
+
+.analystSummaryGrid .coinIcon {
+  width: clamp(15px, 4.8vw, 20px);
+  height: clamp(15px, 4.8vw, 20px);
+  flex: 0 0 auto;
+  margin-left: clamp(3px, 1.4vw, 6px);
+  border-width: 2px;
+  vertical-align: 0;
 }
 
 .analystLiveView,
@@ -2030,6 +2134,11 @@ p {
   color: var(--accent);
   font-size: 20px;
   font-weight: 800;
+}
+
+img.analystAvatar {
+  object-fit: cover;
+  object-position: center;
 }
 
 .analystWorkerHeader h2,
@@ -2120,6 +2229,20 @@ p {
   margin: 0;
   overflow-wrap: anywhere;
   text-shadow: 0 1px 8px rgb(0 0 0 / 38%);
+}
+
+.analystFrameOverlay.is-work-photo {
+  min-height: 34%;
+  padding-top: 40px;
+}
+
+.analystFrameOverlay.is-work-photo strong {
+  font-weight: 600;
+  -webkit-line-clamp: 3;
+}
+
+.analystFrameOverlay.is-work-photo time:first-child {
+  margin-top: 0;
 }
 
 .analystTimeline .photoSlide.is-analyst-task-section {
@@ -2390,13 +2513,6 @@ p {
 .analystNoShift {
   min-height: 116px;
   padding: 20px;
-}
-
-.analystFramePosition {
-  margin-top: -5px;
-  color: var(--muted);
-  text-align: center;
-  font-size: 11px;
 }
 
 .analystHistoryGroup {
@@ -3743,6 +3859,74 @@ body.is-photo-viewer-open {
   display: none;
 }
 
+.cameraCommentField {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px 10px;
+  margin: 14px 0 16px;
+  text-align: left;
+}
+
+.cameraCommentField[hidden] {
+  display: none;
+}
+
+.cameraCommentField > span {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.cameraCommentField > span small,
+.cameraCommentCount {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cameraCommentField textarea {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.cameraCommentField textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(240 122 0 / 12%);
+}
+
+.cameraCommentField textarea[aria-invalid='true'] {
+  border-color: var(--red);
+}
+
+.cameraCommentCount {
+  grid-column: 2;
+  text-align: right;
+}
+
+.cameraCommentCount.is-invalid,
+.cameraCommentError {
+  color: var(--red);
+}
+
+.cameraCommentError {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.cameraCommentError[hidden] {
+  display: none;
+}
+
 .cameraActions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -4754,6 +4938,13 @@ a:focus-visible {
 
 .managerWorkerSelectShell select {
   padding-left: 52px;
+}
+
+.managerWorkerSelectShell.has-profile-avatar::before {
+  background-color: var(--accent-soft);
+  background-image: var(--manager-worker-avatar);
+  background-position: center;
+  background-size: cover;
 }
 
 .managerFileInput {

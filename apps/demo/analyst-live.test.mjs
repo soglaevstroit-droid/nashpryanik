@@ -109,10 +109,11 @@ test('existing PhotoSlider preview, original, scheduler and fullscreen remain in
   assert.match(css, /\.photoCarousel[\s\S]*?touch-action:\s*pan-x pan-y pinch-zoom/);
 });
 
-test('frame position stays below the slider without a separate description block', () => {
-  assert.match(app, /\$\{slider\}<div class="analystFramePosition"/);
+test('sliders use shared dots without a separate numeric frame counter', () => {
+  assert.doesNotMatch(app, /analystFramePosition|Кадр\s.*из/);
   assert.doesNotMatch(css, /\.analystFrameCaption/);
-  assert.match(css, /\.analystFramePosition \{[\s\S]*?text-align:\s*center/);
+  assert.match(slider, /photos\.length > 1/);
+  assert.match(slider, /class="photoDot/);
 });
 
 test('task section start is a separate graphite and copper virtual slide', () => {
@@ -147,12 +148,12 @@ test('task cost uses backend status and formats no more than two decimals', () =
 });
 
 test('task summary uses one compact vertical column without changing other section cards', () => {
-  assert.match(
-    css,
-    /\.analystSectionFacts \{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/,
-  );
+  assert.match(css, /\.analystSectionFacts \{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/);
   assert.doesNotMatch(css, /\.analystSectionFacts \{[^}]*grid-template-columns/);
-  assert.match(app, /Ответственный:[\s\S]*?Начало:[\s\S]*?Завершено:[\s\S]*?Время:[\s\S]*?Фотографий:[\s\S]*?Пауз:[\s\S]*?Стоимость:/);
+  assert.match(
+    app,
+    /Ответственный:[\s\S]*?Начало:[\s\S]*?Завершено:[\s\S]*?Время:[\s\S]*?Фотографий:[\s\S]*?Пауз:[\s\S]*?Стоимость:/,
+  );
 });
 
 test('virtual task cards are narrower while ordinary photo slides keep their width', () => {
@@ -175,7 +176,10 @@ test('completed photo has only a short completion status while full metrics stay
   assert.match(completedOverlay, /Время завершения:/);
   assert.doesNotMatch(completedOverlay, /frame\.description|Время выполнения:|Стоимость:/);
   assert.doesNotMatch(facts, /TASK_COMPLETED|Стоимость рассчитывается/);
-  assert.match(app, /analystTaskSectionSummary[\s\S]*?Время:[\s\S]*?Фотографий:[\s\S]*?Пауз:[\s\S]*?Стоимость:/);
+  assert.match(
+    app,
+    /analystTaskSectionSummary[\s\S]*?Время:[\s\S]*?Фотографий:[\s\S]*?Пауз:[\s\S]*?Стоимость:/,
+  );
 });
 
 test('shift completion photo keeps only worker name and completion time', () => {
@@ -201,31 +205,28 @@ test('daily shift summary is a final graphite virtual report with one-column fac
   assert.match(app, /Пауз:/);
   assert.match(app, /Начислено:/);
   assert.match(app, /shiftCoinUnits[\s\S]*?ожидает расчёта/);
-  assert.match(
-    css,
-    /\.analystShiftSectionSummary \{[^}]*#15181d[^}]*#513025/,
-  );
+  assert.match(css, /\.analystShiftSectionSummary \{[^}]*#15181d[^}]*#513025/);
   assert.match(css, /\.analystSectionFacts \{[^}]*flex-direction:\s*column/);
 });
 
-test('daily summary is virtual, uses the shared frame counter and never opens an Artifact', () => {
+test('daily summary is virtual, uses shared dots and never opens an Artifact', () => {
   assert.match(
     app,
     /isAnalystTaskSection[\s\S]*?'SHIFT_SECTION_SUMMARY'[\s\S]*?\.includes\(frame\.kind\)/,
   );
   assert.match(app, /id: frame\.artifact\?\.id \?\? null/);
-  assert.match(app, /из \$\{frames\.length\}/);
+  assert.doesNotMatch(app, /Кадр\s.*из|из \$\{frames\.length\}/);
   assert.match(app, /isAnalystTaskSection\(frame\)[\s\S]*?analystPhotoPlaceholder.*remove/);
   assert.match(css, /width:\s*clamp\(232px, 72%, 320px\)/);
   assert.doesNotMatch(slider, /SHIFT_SECTION_SUMMARY/);
 });
 
-test('virtual frames participate in dots and counter without photo loading or fullscreen', () => {
+test('virtual frames participate in dots without photo loading or fullscreen', () => {
   assert.match(app, /const photos = frames\.map/);
   assert.match(app, /id: frame\.artifact\?\.id \?\? null/);
   assert.match(app, /isAnalystTaskSection\(frame\)[\s\S]*?analystPhotoPlaceholder.*remove/);
   assert.match(app, /isAnalystTaskSection\(frame\)[\s\S]*?photoLockOverlay.*remove/);
-  assert.match(app, /из \$\{frames\.length\}/);
+  assert.doesNotMatch(app, /Кадр\s.*из|из \$\{frames\.length\}/);
   assert.doesNotMatch(app, /TASK_SECTION_(?:START|SUMMARY)[\s\S]{0,180}loadPreview/);
   assert.match(slider, /if \(!image \|\| image\.dataset\.photoLoading/);
   assert.match(slider, /const image = event\.target\.closest\('\[data-slider-photo-id\]'\)/);

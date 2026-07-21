@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { AuthUser } from '../auth/auth-user.js';
 import { EventService } from '../events/event.service.js';
@@ -14,6 +15,7 @@ import { PhotoPreviewService } from './photo-preview.service.js';
 const maxPhotoFileSizeBytes = 10 * 1024 * 1024;
 const allowedPhotoMimeTypes = new Set(['image/jpeg', 'image/webp']);
 const defaultArtifactListLimit = 100;
+const maxPhotoCommentLength = 200;
 
 export interface PhotoInspection {
   mimeType: string;
@@ -155,21 +157,25 @@ export class ArtifactService {
     assertUploadPhotoDto(dto);
 
     const { file, preview, storageKey } = uploaded;
+    const artifactId = options.artifactId ?? randomUUID();
+    const comment = normalizePhotoComment(dto.comment);
 
     const event = await this.events.createEvent(
       {
         type: 'PHOTO_UPLOADED',
         actorId: user.id,
         entityType: 'artifact',
-        entityId: options.eventEntityId ?? null,
+        entityId: options.eventEntityId ?? artifactId,
         taskId: dto.taskId ?? null,
         taskStepId: dto.taskStepId ?? null,
         workShiftId: options.workShiftId ?? null,
         idempotencyKey: dto.operationId ? `photo:${user.id}:${dto.operationId}` : undefined,
         payload: {
+          artifactId,
           artifactType: 'PHOTO',
           taskId: dto.taskId ?? null,
           taskStepId: dto.taskStepId ?? null,
+          workerId: user.id,
           originalFileName: file.originalname,
           mimeType: file.mimetype,
           fileSize: file.size,
@@ -179,6 +185,7 @@ export class ArtifactService {
         metadata: {
           source: 'artifact-foundation',
           ...options.eventMetadata,
+          comment,
         },
       },
       client,
@@ -186,7 +193,7 @@ export class ArtifactService {
 
     return this.repository.create(
       {
-        id: options.artifactId,
+        id: artifactId,
         type: 'PHOTO',
         eventId: event.id,
         taskId: dto.taskId ?? null,
@@ -402,6 +409,19 @@ function assertUploadPhotoDto(dto: UploadPhotoDto): void {
   assertNullableString(dto.taskId, 'taskId');
   assertNullableString(dto.taskStepId, 'taskStepId');
   assertNullableString(dto.operationId, 'operationId');
+  normalizePhotoComment(dto.comment);
+}
+
+function normalizePhotoComment(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw new BadRequestException('Photo comment must be a string');
+  const normalized = value.replace(/\r\n?/g, '\n').trim();
+  if (!normalized) return null;
+  if ([...normalized].length > maxPhotoCommentLength)
+    throw new BadRequestException(
+      `Photo comment must not exceed ${maxPhotoCommentLength} characters`,
+    );
+  return normalized;
 }
 
 function inspectPhotoFile(file: UploadedArtifactFile): PhotoInspection {

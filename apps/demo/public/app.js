@@ -1,4 +1,4 @@
-/* global AnalystTimeline, CameraUtils, Headers, HTMLElement, File, PhotoSlider, URL, crypto, navigator, sessionStorage */
+/* global AnalystTimeline, CameraUtils, Headers, HTMLElement, File, LiveCoins, PhotoSlider, ProfileAvatar, URL, crypto, navigator, sessionStorage */
 
 const authTokenStorageKey = 'stroit.demo.accessToken';
 const legacyShiftStorageKey = 'stroit.demo.shiftOpen';
@@ -8,6 +8,7 @@ const managerPhotoMaxBytes = 8 * 1024 * 1024;
 const managerPhotosMaxBytes = 96 * 1024 * 1024;
 const managerPhotoMaxCount = 12;
 const managerAllowedPhotoTypes = new Set(['image/jpeg', 'image/webp']);
+const maxPhotoCommentLength = 200;
 
 const steps = [
   {
@@ -55,6 +56,12 @@ let analystPollingTimer = null;
 let analystLiveRequest = null;
 let analystRequestGeneration = 0;
 let analystLiveSignature = '';
+let analystSummaryRequest = null;
+let analystSummaryGeneration = 0;
+let analystTodayTicker = null;
+let analystTodaySnapshot = null;
+let analystTodayDisplayedCoinUnits = null;
+let analystSummaryCalculatedAtMs = 0;
 const analystFrameIndexStore = AnalystTimeline.createIndexStore();
 let selectedTaskId = null;
 let selectedTask = null;
@@ -77,6 +84,7 @@ let managerPendingConfirmation = null;
 let managerDraftOperationId = null;
 let managerTaskSubmitting = false;
 let managerWorkersAvailable = false;
+let managerWorkersById = new Map();
 let managerFormReturnFocus = null;
 let managerConfirmReturnFocus = null;
 let managerInitialObjectId = null;
@@ -179,7 +187,12 @@ const elements = {
   loginForm: document.querySelector('#loginForm'),
   emailInput: document.querySelector('#emailInput'),
   passwordInput: document.querySelector('#passwordInput'),
+  workerProfileAvatar: document.querySelector('#workerProfileAvatar'),
   userInfo: document.querySelector('#userInfo'),
+  analystUserInfo: document.querySelector('#analystUserInfo'),
+  analystTotalEarned: document.querySelector('#analystTotalEarned'),
+  analystWorkerBalance: document.querySelector('#analystWorkerBalance'),
+  analystEarnedToday: document.querySelector('#analystEarnedToday'),
   totalCoinBalance: document.querySelector('#totalCoinBalance'),
   workerShiftStatus: document.querySelector('#workerShiftStatus'),
   approvedCoinAmount: document.querySelector('#approvedCoinAmount'),
@@ -214,6 +227,10 @@ const elements = {
   shiftCameraPreview: document.querySelector('#shiftCameraPreview'),
   shiftCameraState: document.querySelector('#shiftCameraState'),
   shiftCameraError: document.querySelector('#shiftCameraError'),
+  shiftCameraCommentField: document.querySelector('#shiftCameraCommentField'),
+  shiftCameraCommentInput: document.querySelector('#shiftCameraCommentInput'),
+  shiftCameraCommentCount: document.querySelector('#shiftCameraCommentCount'),
+  shiftCameraCommentError: document.querySelector('#shiftCameraCommentError'),
   shiftCameraCancelButton: document.querySelector('#shiftCameraCancelButton'),
   shiftCameraRetakeButton: document.querySelector('#shiftCameraRetakeButton'),
   shiftCameraCaptureButton: document.querySelector('#shiftCameraCaptureButton'),
@@ -259,6 +276,7 @@ const elements = {
   managerTaskForm: document.querySelector('#managerTaskForm'),
   managerObject: document.querySelector('#managerObject'),
   managerWorker: document.querySelector('#managerWorker'),
+  managerWorkerSelectShell: document.querySelector('.managerWorkerSelectShell'),
   managerSteps: document.querySelector('#managerSteps'),
   managerPhotos: document.querySelector('#managerPhotos'),
   managerPhotoPreview: document.querySelector('#managerPhotoPreview'),
@@ -337,7 +355,9 @@ elements.loginForm.addEventListener('submit', async (event) => {
 elements.historyMoreButton.addEventListener('click', () => loadHistory(false));
 elements.managerTaskForm.addEventListener('submit', submitManagerTask);
 elements.managerPhotos.addEventListener('change', handleManagerPhotoSelection);
+elements.managerWorker.addEventListener('change', updateManagerWorkerAvatar);
 elements.shiftCameraFileInput.addEventListener('change', handleCameraFileSelection);
+elements.shiftCameraCommentInput.addEventListener('input', updateCameraCommentState);
 elements.managerTaskForm.addEventListener('input', clearManagerFormError);
 elements.managerTaskForm.addEventListener('keydown', (event) => {
   if (
@@ -756,6 +776,7 @@ async function showWorkspace() {
 
   if (isManager()) {
     stopAnalystPolling();
+    stopAnalystTodayTicker();
     configureBottomNavigation();
     elements.userInfo.textContent = currentUser.name ?? 'Руководитель';
     elements.loginScreen.hidden = true;
@@ -770,6 +791,7 @@ async function showWorkspace() {
   if (isAnalyst()) {
     configureBottomNavigation();
     elements.userInfo.textContent = currentUser.name ?? 'Аналитик';
+    elements.analystUserInfo.textContent = currentUser.name ?? 'Аналитик';
     elements.loginScreen.hidden = true;
     elements.loginScreen.classList.remove('is-active');
     elements.workspaceScreen.hidden = false;
@@ -777,13 +799,14 @@ async function showWorkspace() {
     previousWorkingSection = 'tasks';
     openView('analystLive');
     updateBottomNavigation();
-    await loadAnalystWorkers({ initial: true });
+    await Promise.all([loadAnalystWorkers({ initial: true }), loadAnalystSummary()]);
     startAnalystPolling();
     return true;
   }
 
   if (!isWorker()) {
     stopAnalystPolling();
+    stopAnalystTodayTicker();
     configureBottomNavigation();
     elements.userInfo.textContent = currentUser?.name ?? currentUser?.role ?? 'Пользователь';
     elements.loginScreen.hidden = true;
@@ -795,6 +818,9 @@ async function showWorkspace() {
     updateBottomNavigation();
     return true;
   }
+
+  const workerAvatarUrl = ProfileAvatar.urlForUser(currentUser);
+  if (workerAvatarUrl) elements.workerProfileAvatar.src = workerAvatarUrl;
 
   const isSynced = await refreshShiftState();
 
@@ -1013,8 +1039,9 @@ async function restoreWorkerWorkspace() {
 async function refreshCurrentWorkspace() {
   if (isWorker()) return restoreWorkerWorkspace();
   if (isAnalyst()) {
-    if (currentSection === 'history') return loadAnalystHistory();
-    return loadAnalystWorkers();
+    const viewRequest = currentSection === 'history' ? loadAnalystHistory() : loadAnalystWorkers();
+    const [viewLoaded, summaryLoaded] = await Promise.all([viewRequest, loadAnalystSummary()]);
+    return viewLoaded || summaryLoaded;
   }
   if (!isManager()) return true;
   const loaded = await loadManagerTasks();
@@ -1221,13 +1248,10 @@ function stopCoinTicker() {
 
 function renderOnlineCoins() {
   if (!currentShift?.startedAt || !workerSummary?.policy) return stopCoinTicker();
-  const durationSeconds = Math.max(
-    0,
-    Math.floor((Date.now() - new Date(currentShift.startedAt).getTime()) / 1_000),
-  );
-  const units = Math.min(
-    durationSeconds * workerSummary.policy.coinUnitsPerSecond,
-    workerSummary.policy.dailyStandardLimitCoinUnits,
+  const units = LiveCoins.calculateStandardCoinUnits(
+    currentShift.startedAt,
+    Date.now(),
+    workerSummary.policy,
   );
   elements.approvedCoinAmount.textContent = formatCoinUnits(units);
   elements.approvedCoinAmount.classList.add('is-live');
@@ -1236,15 +1260,21 @@ function renderOnlineCoins() {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && accessToken) {
     void refreshCurrentWorkspace();
-    if (isAnalyst()) startAnalystPolling();
-  } else if (isAnalyst()) stopAnalystPolling();
+    if (isAnalyst()) {
+      startAnalystPolling();
+      startAnalystTodayTicker();
+    }
+  } else if (isAnalyst()) {
+    stopAnalystPolling();
+    stopAnalystTodayTicker();
+  }
 });
 
 function startAnalystPolling() {
   stopAnalystPolling();
   if (!isAnalyst() || document.hidden) return;
   analystPollingTimer = window.setTimeout(async () => {
-    await loadAnalystWorkers();
+    await refreshCurrentWorkspace();
     startAnalystPolling();
   }, 20_000);
 }
@@ -1356,6 +1386,7 @@ async function openManagerTaskForm(task = null) {
       (item) => `<option value="${item.id}">${escapeHtml(item.name || item.email)}</option>`,
     ),
   ].join('');
+  managerWorkersById = new Map(workers.map((worker) => [worker.id, worker]));
   managerWorkersAvailable = true;
   clearManagerPhotoPreviews();
   elements.managerTaskForm.reset();
@@ -1410,9 +1441,24 @@ async function openManagerTaskForm(task = null) {
     if (task.status === 'IN_PROGRESS') elements.managerWorker.disabled = true;
     task.steps.forEach((step) => addManagerStep({ focus: false, step }));
   }
+  updateManagerWorkerAvatar();
   await renderManagerPhotoPreview();
   setManagerSubmitting(false);
   openModal('managerTask');
+}
+
+function updateManagerWorkerAvatar() {
+  const worker = managerWorkersById.get(elements.managerWorker.value);
+  const avatarUrl = ProfileAvatar.urlForUser(worker);
+  elements.managerWorkerSelectShell.classList.toggle('has-profile-avatar', Boolean(avatarUrl));
+  if (avatarUrl) {
+    elements.managerWorkerSelectShell.style.setProperty(
+      '--manager-worker-avatar',
+      `url("${avatarUrl}")`,
+    );
+  } else {
+    elements.managerWorkerSelectShell.style.removeProperty('--manager-worker-avatar');
+  }
 }
 
 function addManagerStep({ focus = true, step = null } = {}) {
@@ -2750,6 +2796,80 @@ async function loadAnalystWorkers({ initial = false } = {}) {
   return analystLiveRequest;
 }
 
+async function loadAnalystSummary() {
+  if (!isAnalyst()) return false;
+  if (analystSummaryRequest) return analystSummaryRequest;
+  const generation = ++analystSummaryGeneration;
+  analystSummaryRequest = (async () => {
+    try {
+      const response = await apiFetch('/api/v1/analyst/summary');
+      const summary = await readResponseBody(response);
+      if (!response.ok || !summary || typeof summary !== 'object')
+        throw new Error(getApiMessage(summary));
+      if (generation !== analystSummaryGeneration || !isAnalyst()) return false;
+      return renderAnalystSummary(summary);
+    } catch {
+      if (generation !== analystSummaryGeneration || !isAnalyst()) return false;
+      renderAnalystSummary(null);
+      return false;
+    } finally {
+      if (generation === analystSummaryGeneration) analystSummaryRequest = null;
+    }
+  })();
+  return analystSummaryRequest;
+}
+
+function renderAnalystSummary(summary) {
+  const calculatedAtMs = new Date(summary?.calculatedAt).getTime();
+  if (Number.isFinite(calculatedAtMs) && calculatedAtMs <= analystSummaryCalculatedAtMs)
+    return false;
+  const now = Date.now();
+  const previousDisplayCoinUnits = analystTodaySnapshot
+    ? LiveCoins.projectAnalystCoinUnits(analystTodaySnapshot, now)
+    : analystTodayDisplayedCoinUnits;
+  const nextSnapshot = LiveCoins.createAnalystSnapshot(summary, now, previousDisplayCoinUnits);
+  if (!nextSnapshot) {
+    elements.analystTotalEarned.textContent = '—';
+    elements.analystWorkerBalance.textContent = '—';
+    elements.analystEarnedToday.textContent = '—';
+    elements.analystEarnedToday.classList.remove('is-live');
+    analystTodaySnapshot = null;
+    analystTodayDisplayedCoinUnits = null;
+    stopAnalystTodayTicker();
+    return false;
+  }
+  analystSummaryCalculatedAtMs = nextSnapshot.calculatedAtMs;
+  analystTodaySnapshot = nextSnapshot;
+  elements.analystTotalEarned.textContent = formatSystemCoins(summary.totalEarnedCoins);
+  elements.analystWorkerBalance.textContent = formatSystemCoins(summary.currentWorkerBalanceCoins);
+  renderAnalystTodayCoins();
+  startAnalystTodayTicker();
+  return true;
+}
+
+function renderAnalystTodayCoins() {
+  if (!analystTodaySnapshot) return;
+  const projectedCoinUnits = LiveCoins.projectAnalystCoinUnits(analystTodaySnapshot, Date.now());
+  if (!Number.isSafeInteger(projectedCoinUnits)) return;
+  analystTodayDisplayedCoinUnits = projectedCoinUnits;
+  elements.analystEarnedToday.textContent = formatSystemCoins(projectedCoinUnits / 100);
+  elements.analystEarnedToday.classList.toggle(
+    'is-live',
+    analystTodaySnapshot.activeShifts.length > 0,
+  );
+}
+
+function startAnalystTodayTicker() {
+  stopAnalystTodayTicker();
+  if (!isAnalyst() || document.hidden || !analystTodaySnapshot) return;
+  analystTodayTicker = window.setInterval(renderAnalystTodayCoins, 1_000);
+}
+
+function stopAnalystTodayTicker() {
+  if (analystTodayTicker !== null) window.clearInterval(analystTodayTicker);
+  analystTodayTicker = null;
+}
+
 function renderAnalystWorkers(workers) {
   const signature = JSON.stringify(workers);
   if (signature === analystLiveSignature) return;
@@ -2768,6 +2888,10 @@ function renderAnalystWorkers(workers) {
 function renderAnalystWorkerCard(entry, options = {}) {
   const workerName = entry.worker.name?.trim() || entry.worker.email;
   const initial = workerName.slice(0, 1).toUpperCase();
+  const avatarUrl = ProfileAvatar.urlForUser(entry.worker);
+  const avatar = avatarUrl
+    ? `<img class="analystAvatar" src="${escapeHtml(avatarUrl)}" alt="" />`
+    : `<span class="analystAvatar" aria-hidden="true">${escapeHtml(initial)}</span>`;
   const shift = entry.activeShift ?? entry.shift ?? null;
   const frames = Array.isArray(entry.timeline) ? entry.timeline : [];
   const status = entry.status ?? (shift?.status === 'FINISHED' ? 'SHIFT_COMPLETED' : 'ON_SHIFT');
@@ -2782,7 +2906,7 @@ function renderAnalystWorkerCard(entry, options = {}) {
   const timeline = shift
     ? renderAnalystTimeline(frames, shift.id, workerKey)
     : '<div class="analystNoShift"><span>Смена не начата</span></div>';
-  return `<article class="analystWorkerCard is-${status.toLowerCase().replaceAll('_', '-')}"><header class="analystWorkerHeader"><span class="analystAvatar" aria-hidden="true">${escapeHtml(initial)}</span><div><h2>${escapeHtml(workerName)}</h2><span class="analystStatus">${escapeHtml(statusLabel)}</span>${shiftText}${taskText}</div></header>${timeline}</article>`;
+  return `<article class="analystWorkerCard is-${status.toLowerCase().replaceAll('_', '-')}"><header class="analystWorkerHeader">${avatar}<div><h2>${escapeHtml(workerName)}</h2><span class="analystStatus">${escapeHtml(statusLabel)}</span>${shiftText}${taskText}</div></header>${timeline}</article>`;
 }
 
 function renderAnalystTimeline(frames, shiftId, workerKey) {
@@ -2801,7 +2925,7 @@ function renderAnalystTimeline(frames, shiftId, workerKey) {
     showEmpty: false,
   });
   const slider = decorateAnalystSlides(sliderMarkup, frames);
-  return `<section class="analystTimeline" data-analyst-timeline data-analyst-worker-id="${escapeHtml(workerKey)}" data-initial-frame="${selectedIndex}">${slider}<div class="analystFramePosition">Кадр <span>${selectedIndex + 1}</span> из ${frames.length}</div></section>`;
+  return `<section class="analystTimeline" data-analyst-timeline data-analyst-worker-id="${escapeHtml(workerKey)}" data-initial-frame="${selectedIndex}">${slider}</section>`;
 }
 
 function decorateAnalystSlides(sliderMarkup, frames) {
@@ -2824,10 +2948,7 @@ function decorateAnalystSlides(sliderMarkup, frames) {
       slide.insertAdjacentHTML('beforeend', renderAnalystTaskSection(frame));
       continue;
     }
-    slide.insertAdjacentHTML(
-      'beforeend',
-      renderAnalystFrameOverlay(frame, index),
-    );
+    slide.insertAdjacentHTML('beforeend', renderAnalystFrameOverlay(frame, index));
   }
   return template.innerHTML;
 }
@@ -2836,6 +2957,10 @@ function renderAnalystFrameOverlay(frame, index) {
   const attributes = `class="analystFrameOverlay" data-analyst-caption="${index}" data-frame-id="${escapeHtml(frame.id)}"`;
   const occurredAt = escapeHtml(frame.occurredAt);
   const time = formatAnalystTime(frame.occurredAt);
+  if (frame.kind === 'TASK_PHOTO_ADDED') {
+    const comment = typeof frame.comment === 'string' ? frame.comment.trim() : '';
+    return `<div class="analystFrameOverlay is-work-photo" data-analyst-caption="${index}" data-frame-id="${escapeHtml(frame.id)}">${comment ? `<strong>${escapeHtml(comment)}</strong>` : ''}<time datetime="${occurredAt}">${time}</time></div>`;
+  }
   if (frame.kind === 'TASK_COMPLETED')
     return `<div ${attributes}><strong>Задача выполнена</strong><time datetime="${occurredAt}">Время завершения: ${time}</time></div>`;
   if (frame.kind === 'SHIFT_COMPLETED')
@@ -2917,8 +3042,6 @@ function updateAnalystTimeline(timeline) {
   if (!slides.length) return;
   const index = AnalystTimeline.findActiveIndex(slides, carousel.scrollLeft, carousel.clientWidth);
   if (index < 0) return;
-  const counter = timeline.querySelector('.analystFramePosition span');
-  if (counter) counter.textContent = String(index + 1);
   const workerId = timeline.dataset.analystWorkerId;
   const frameCount = timeline.querySelectorAll('[data-analyst-caption]').length;
   analystFrameIndexStore.set(workerId, index, slides[index]?.dataset.analystFrameId ?? null);
@@ -3213,6 +3336,7 @@ async function handleApiFailure(status, body, options = {}) {
 function handleUnauthorized() {
   clearAuthToken();
   stopAnalystPolling();
+  stopAnalystTodayTicker();
   stopCameraStream();
   cleanupCameraAttempt({ keepOperationId: false });
   closeModal();
@@ -3392,6 +3516,7 @@ async function handleCameraFileSelection() {
   elements.shiftCameraConfirmButton.hidden = false;
   elements.shiftCameraConfirmButton.disabled = false;
   elements.shiftCameraError.hidden = true;
+  showCameraCommentField();
 }
 
 async function flipCamera() {
@@ -3477,6 +3602,7 @@ async function captureCameraPhoto() {
   elements.shiftCameraConfirmButton.hidden = false;
   elements.shiftCameraConfirmButton.disabled = false;
   elements.shiftCameraError.hidden = true;
+  showCameraCommentField();
   stopCameraStream();
 }
 
@@ -3535,6 +3661,8 @@ async function retakeCameraPhoto() {
 
   clearCameraPreview();
   cameraAttempt.blob = null;
+  elements.shiftCameraCommentField.hidden = true;
+  clearCameraCommentError();
   elements.shiftCameraPreview.hidden = true;
   elements.shiftCameraCaptureButton.hidden = false;
   elements.shiftCameraRetakeButton.hidden = true;
@@ -3553,11 +3681,15 @@ async function submitCameraPhoto() {
     return;
   }
 
+  const commentResult = validateCameraComment();
+  if (!commentResult.valid) return;
+
   cameraAttempt.isSubmitting = true;
   setCameraLoading('Сохраняем фотографию...');
   elements.shiftCameraConfirmButton.disabled = true;
   elements.shiftCameraRetakeButton.disabled = true;
   elements.shiftCameraCancelButton.disabled = true;
+  elements.shiftCameraCommentInput.disabled = true;
 
   const formData = new FormData();
   formData.append(
@@ -3574,6 +3706,7 @@ async function submitCameraPhoto() {
     formData.append('taskId', cameraAttempt.taskId);
     if (cameraAttempt.mode === 'TASK_STEP') formData.append('taskStepId', cameraAttempt.taskStepId);
     formData.append('operationId', cameraAttempt.operationId);
+    if (commentResult.comment !== null) formData.append('comment', commentResult.comment);
   } else if (cameraAttempt.mode === 'TASK_COMPLETE') {
     formData.append('operationId', cameraAttempt.operationId);
   } else {
@@ -3604,6 +3737,7 @@ async function submitCameraPhoto() {
       elements.shiftCameraConfirmButton.disabled = false;
       elements.shiftCameraRetakeButton.disabled = false;
       elements.shiftCameraCancelButton.disabled = false;
+      elements.shiftCameraCommentInput.disabled = false;
       await handleApiFailure(response.status, body);
       return;
     }
@@ -3627,6 +3761,7 @@ async function submitCameraPhoto() {
     elements.shiftCameraConfirmButton.disabled = false;
     elements.shiftCameraRetakeButton.disabled = false;
     elements.shiftCameraCancelButton.disabled = false;
+    elements.shiftCameraCommentInput.disabled = false;
     setCameraError('Не удалось сохранить фотографию. Проверьте соединение и повторите попытку.');
   }
 }
@@ -3651,6 +3786,43 @@ function resetCameraUi() {
   elements.shiftCameraConfirmButton.disabled = true;
   elements.shiftCameraCancelButton.disabled = false;
   elements.shiftCameraFlipButton.hidden = true;
+  elements.shiftCameraCommentField.hidden = true;
+  elements.shiftCameraCommentInput.value = '';
+  elements.shiftCameraCommentInput.disabled = false;
+  updateCameraCommentState();
+}
+
+function showCameraCommentField() {
+  elements.shiftCameraCommentField.hidden = !['TASK_STEP', 'TASK_PHOTO'].includes(
+    cameraAttempt.mode,
+  );
+  updateCameraCommentState();
+}
+
+function updateCameraCommentState() {
+  const length = [...elements.shiftCameraCommentInput.value].length;
+  elements.shiftCameraCommentCount.textContent = `${length} / ${maxPhotoCommentLength}`;
+  elements.shiftCameraCommentCount.classList.toggle('is-invalid', length > maxPhotoCommentLength);
+  if (length <= maxPhotoCommentLength) clearCameraCommentError();
+}
+
+function clearCameraCommentError() {
+  elements.shiftCameraCommentInput.removeAttribute('aria-invalid');
+  elements.shiftCameraCommentError.hidden = true;
+  elements.shiftCameraCommentError.textContent = '';
+}
+
+function validateCameraComment() {
+  if (!['TASK_STEP', 'TASK_PHOTO'].includes(cameraAttempt.mode))
+    return { valid: true, comment: null };
+  const comment = elements.shiftCameraCommentInput.value.replace(/\r\n?/g, '\n').trim();
+  if ([...comment].length <= maxPhotoCommentLength)
+    return { valid: true, comment: comment || null };
+  elements.shiftCameraCommentInput.setAttribute('aria-invalid', 'true');
+  elements.shiftCameraCommentError.textContent = `Сократите комментарий до ${maxPhotoCommentLength} символов.`;
+  elements.shiftCameraCommentError.hidden = false;
+  elements.shiftCameraCommentInput.focus();
+  return { valid: false, comment: null };
 }
 
 function setCameraLoading(message) {
@@ -3718,6 +3890,16 @@ function formatCoinUnits(units) {
   const whole = Math.floor(safeUnits / 100);
   const fraction = String(safeUnits % 100).padStart(2, '0');
   return `${whole.toLocaleString('ru-RU').replace(/\u00a0/g, ' ')},${fraction}`;
+}
+
+function formatSystemCoins(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat('ru-RU', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+    .format(value)
+    .replace(/[\u00a0\u202f]/g, ' ');
 }
 
 function formatApprovedCoinUnits(units) {

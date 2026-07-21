@@ -8,10 +8,12 @@ const rootDir = fileURLToPath(new URL('public/', import.meta.url));
 const port = Number(process.env.DEMO_PORT ?? 3100);
 const backendUrl = new URL(process.env.DEMO_BACKEND_URL ?? 'http://localhost:3000');
 const contentTypes = {
+  '.avif': 'image/avif',
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webp': 'image/webp',
 };
 
 const server = createServer((req, res) => {
@@ -77,6 +79,9 @@ function serveStatic(url, res) {
 
   res.writeHead(200, {
     'content-type': contentTypes[extname(filePath)] ?? 'application/octet-stream',
+    'cache-control': pathname.startsWith('/assets/app-background.')
+      ? 'public, max-age=86400'
+      : 'no-cache',
   });
   createReadStream(filePath).pipe(res);
 }

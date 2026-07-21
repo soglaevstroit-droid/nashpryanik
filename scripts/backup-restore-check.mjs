@@ -156,12 +156,18 @@ restore_finished="$(date +%s)"
 query() { docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U "$db_user" -d "$temp_db" -Atqc "$1"; }
 test "$(query 'SELECT 1')" = 1 || { emit error select_failed; exit 33; }
 tables="$(query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'")"
-users_table="$(query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='users'")"
-tasks_table="$(query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='tasks'")"
-migrations_table="$(query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='_prisma_migrations'")"
-test "$users_table" = 1 && test "$tasks_table" = 1 && test "$migrations_table" = 1 || { emit error required_tables_missing; exit 34; }
+for required_table in users tasks task_steps artifacts events work_shifts task_messages shift_accruals _prisma_migrations; do
+  table_exists="$(query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='$required_table'")"
+  test "$table_exists" = 1 || { emit error "required_table_missing_$required_table"; exit 34; }
+done
 users="$(query 'SELECT COUNT(*) FROM users')"
 tasks="$(query 'SELECT COUNT(*) FROM tasks')"
+task_steps="$(query 'SELECT COUNT(*) FROM task_steps')"
+artifacts="$(query 'SELECT COUNT(*) FROM artifacts')"
+events="$(query 'SELECT COUNT(*) FROM events')"
+work_shifts="$(query 'SELECT COUNT(*) FROM work_shifts')"
+task_messages="$(query 'SELECT COUNT(*) FROM task_messages')"
+shift_accruals="$(query 'SELECT COUNT(*) FROM shift_accruals')"
 migrations="$(query 'SELECT COUNT(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL')"
 test "$migrations" -gt 0 || { emit error migrations_empty; exit 35; }
 test "$migrations" -le "$prod_migrations" || { emit error migrations_ahead_of_production; exit 36; }
@@ -169,6 +175,12 @@ emit restore_duration_seconds "$((restore_finished - restore_started))"
 emit table_count "$tables"
 emit users_count "$users"
 emit tasks_count "$tasks"
+emit task_steps_count "$task_steps"
+emit artifacts_count "$artifacts"
+emit events_count "$events"
+emit work_shifts_count "$work_shifts"
+emit task_messages_count "$task_messages"
+emit shift_accruals_count "$shift_accruals"
 emit migrations_count "$migrations"
 emit production_table_count "$prod_tables"
 emit production_users_count "$prod_users"
@@ -226,6 +238,12 @@ function parseRemoteOutput(output) {
     'table_count',
     'users_count',
     'tasks_count',
+    'task_steps_count',
+    'artifacts_count',
+    'events_count',
+    'work_shifts_count',
+    'task_messages_count',
+    'shift_accruals_count',
     'migrations_count',
     'production_table_count',
     'production_users_count',
@@ -261,6 +279,12 @@ function applyRemoteResult(remote, response) {
     tableCount: Number(remote.table_count ?? 0),
     usersCount: Number(remote.users_count ?? 0),
     tasksCount: Number(remote.tasks_count ?? 0),
+    taskStepsCount: Number(remote.task_steps_count ?? 0),
+    artifactsCount: Number(remote.artifacts_count ?? 0),
+    eventsCount: Number(remote.events_count ?? 0),
+    workShiftsCount: Number(remote.work_shifts_count ?? 0),
+    taskMessagesCount: Number(remote.task_messages_count ?? 0),
+    shiftAccrualsCount: Number(remote.shift_accruals_count ?? 0),
     migrationsCount: Number(remote.migrations_count ?? 0),
   };
   report.info.production = {

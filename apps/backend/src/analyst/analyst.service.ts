@@ -6,6 +6,12 @@ import {
   TaskCostSnapshot,
   TaskCostStatus,
 } from '../tasks/task-cost-policy.js';
+import {
+  calculateActiveCoinUnits,
+  COIN_UNITS_PER_COIN,
+  COIN_UNITS_PER_SECOND,
+  DAILY_STANDARD_LIMIT_COIN_UNITS,
+} from '../work-shifts/coin-policy.js';
 
 const timelineEventTypes = [
   'WORK_SHIFT_STARTED',
@@ -70,6 +76,7 @@ interface TimelineFrame {
     originalFileName: string;
   } | null;
   reason: string | null;
+  comment?: string | null;
   taskDurationMinutes: number | null;
   taskCoins: number | null;
   taskCoinsState: 'PENDING' | 'AVAILABLE';
@@ -82,6 +89,80 @@ interface TimelineFrame {
 @Injectable()
 export class AnalystService {
   constructor(private readonly database: DatabaseService) {}
+
+  async getSummary(now = new Date()) {
+    const dayStart = startOfUtcDay(now);
+    const [workers, approvedAccruals, activeShifts] = await Promise.all([
+      this.database.user.findMany({
+        where: { role: 'WORKER' },
+        select: { id: true, isActive: true, openingBalanceCoinUnits: true },
+      }),
+      this.database.shiftAccrual.findMany({
+        where: { status: 'APPROVED' },
+        select: {
+          workerId: true,
+          standardCoinUnits: true,
+          calculatedOvertimeCoinUnits: true,
+          analystFinalOvertimeUnits: true,
+          overtimeDecision: true,
+          workShift: { select: { status: true, finishedAt: true } },
+        },
+      }),
+      this.database.workShift.findMany({
+        where: { status: 'ACTIVE', startedAt: { lte: now } },
+        select: { userId: true, startedAt: true },
+      }),
+    ]);
+
+    const workerIds = new Set(workers.map((worker) => worker.id));
+    const activeWorkers = workers.filter((worker) => worker.isActive);
+    const activeWorkerIds = new Set(activeWorkers.map((worker) => worker.id));
+    const confirmedHistorical = approvedAccruals.filter(
+      (accrual) =>
+        workerIds.has(accrual.workerId) &&
+        accrual.workShift.status === 'FINISHED' &&
+        accrual.workShift.finishedAt &&
+        accrual.workShift.finishedAt <= now,
+    );
+    const totalEarnedCoinUnits = confirmedHistorical.reduce(
+      (sum, accrual) => sum + confirmedAccrualCoinUnits(accrual),
+      0,
+    );
+    const currentWorkerBalanceCoinUnits =
+      activeWorkers.reduce((sum, worker) => sum + worker.openingBalanceCoinUnits, 0) +
+      approvedAccruals.reduce(
+        (sum, accrual) =>
+          activeWorkerIds.has(accrual.workerId) ? sum + accrual.standardCoinUnits : sum,
+        0,
+      );
+    const finishedTodayCoinUnits = confirmedHistorical.reduce((sum, accrual) => {
+      const finishedAt = accrual.workShift.finishedAt!;
+      return finishedAt >= dayStart && finishedAt <= now
+        ? sum + confirmedAccrualCoinUnits(accrual)
+        : sum;
+    }, 0);
+    const activeTodayCoinUnits = activeShifts.reduce(
+      (sum, shift) =>
+        workerIds.has(shift.userId)
+          ? sum + calculateActiveCoinUnits(shift.startedAt, now).standardCoinUnits
+          : sum,
+      0,
+    );
+
+    return {
+      totalEarnedCoins: coinUnitsToCoins(totalEarnedCoinUnits),
+      currentWorkerBalanceCoins: coinUnitsToCoins(currentWorkerBalanceCoinUnits),
+      earnedTodayCoins: coinUnitsToCoins(finishedTodayCoinUnits + activeTodayCoinUnits),
+      calculatedAt: now,
+      live: {
+        coinUnitsPerSecond: COIN_UNITS_PER_SECOND,
+        dailyStandardLimitCoinUnits: DAILY_STANDARD_LIMIT_COIN_UNITS,
+        activeShifts: activeShifts
+          .filter((shift) => workerIds.has(shift.userId))
+          .map((shift) => ({ startedAt: shift.startedAt })),
+      },
+    };
+  }
 
   async getLiveWorkers(now = new Date()) {
     const workers = await this.database.user.findMany({
@@ -336,6 +417,7 @@ export class AnalystService {
     let title = '';
     let description: string | null = task?.title ?? null;
     let reason: string | null = null;
+    let comment: string | null = null;
     let artifact: { id: string; originalFileName: string } | null = event.artifacts[0] ?? null;
     let duration: number | null = null;
     let taskCost: TaskCostSnapshot | null = null;
@@ -350,6 +432,7 @@ export class AnalystService {
     } else if (event.type === 'PHOTO_UPLOADED' && task) {
       kind = 'TASK_PHOTO_ADDED';
       title = 'Задача выполняется';
+      comment = stringValue(metadata.comment) ?? stringValue(payload.comment);
       artifact ??= latestArtifact(taskArtifacts, event.createdAt);
     } else if (event.type === 'TASK_PAUSED' && task) {
       title = 'Задача поставлена на паузу';
@@ -397,6 +480,7 @@ export class AnalystService {
       task: task ? { id: task.id, title: task.title } : null,
       artifact: artifact ? artifactView(artifact) : null,
       reason,
+      comment,
       taskDurationMinutes: duration,
       taskCoins: taskCost?.taskCostCoinUnits ?? null,
       taskCoinsState: taskCost?.costStatus === 'CALCULATED' ? 'AVAILABLE' : 'PENDING',
@@ -564,6 +648,26 @@ function stringValue(value: unknown) {
 
 function sameUtcDay(left: Date, right: Date) {
   return left.toISOString().slice(0, 10) === right.toISOString().slice(0, 10);
+}
+
+function startOfUtcDay(value: Date) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+}
+
+function confirmedAccrualCoinUnits(accrual: {
+  standardCoinUnits: number;
+  calculatedOvertimeCoinUnits: number;
+  analystFinalOvertimeUnits: number | null;
+  overtimeDecision: string;
+}) {
+  const overtimeCoinUnits = ['APPROVED', 'ADJUSTED'].includes(accrual.overtimeDecision)
+    ? (accrual.analystFinalOvertimeUnits ?? accrual.calculatedOvertimeCoinUnits)
+    : 0;
+  return accrual.standardCoinUnits + overtimeCoinUnits;
+}
+
+function coinUnitsToCoins(units: number) {
+  return units / COIN_UNITS_PER_COIN;
 }
 
 function deduplicateFrames(frames: TimelineFrame[]) {
