@@ -22,8 +22,7 @@ test('future steps never infer completion from index and completed requires back
   assert.match(app, /candidate\.status !== 'COMPLETED'/);
   assert.match(app, /step\.status === 'COMPLETED' && Boolean\(step\.completedAt\)/);
   assert.doesNotMatch(app, /index < currentStep|order < currentStep/);
-  assert.match(seed, /isCompletedDemoStep = id\.endsWith\('4'\) && order === 1/);
-  assert.match(seed, /isActiveDemoStep = id\.endsWith\('4'\) && order === 2/);
+  assert.doesNotMatch(seed, /database\.taskStep\./);
 });
 
 test('camera waits for a real frame and preview image before stopping stream', () => {
@@ -44,7 +43,7 @@ test('preview failure cannot be confirmed and cleanup revokes its ObjectURL', ()
   assert.match(app, /shiftCameraConfirmButton\.hidden = true/);
   assert.match(app, /shiftCameraConfirmButton\.disabled = true/);
   assert.match(app, /URL\.revokeObjectURL\(cameraAttempt\.previewUrl\)/);
-  assert.match(app, /formData\.append\([\s\S]*new File\(\[cameraAttempt\.blob\]/);
+  assert.match(app, /formData\.append\([\s\S]*new File\(\s*\[cameraAttempt\.blob\]/);
 });
 
 test('preview image stays above stopped video and hidden camera layers stay hidden', () => {
@@ -73,7 +72,7 @@ test('one role-aware menu keeps manager history fourth and rebuilds after user c
   assert.match(app, /function configureBottomNavigation\(\)/);
   assert.match(
     app,
-    /const expectedSections = \['tasks', 'messages', 'order', 'history', 'profile'\]/,
+    /const expectedSections = analyst[\s\S]*?\['tasks', 'history', 'profile'\][\s\S]*?\['tasks', 'messages', 'order', 'history', 'profile'\]/,
   );
   assert.match(app, /button\.dataset\.menuRole = currentUser\?\.role/);
   assert.match(app, /elements\.orderNavLabel\.textContent = manager \? 'Поставить' : 'Заказать'/);

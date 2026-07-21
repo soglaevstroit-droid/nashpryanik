@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { UploadedArtifactFile } from '../artifacts/uploaded-artifact-file.js';
 import { AuthUser } from '../auth/auth-user.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
@@ -53,9 +65,21 @@ export class TaskController {
   }
 
   @Patch(':id/accept')
-  @Roles(...workerTaskRoles)
+  @Roles('WORKER')
   acceptTask(@CurrentUser() user: AuthUser, @Param('id') id: string): Promise<TaskRecord> {
     return this.tasks.acceptTask(user, id);
+  }
+
+  @Post(':id/complete-with-photo')
+  @Roles('WORKER')
+  @UseInterceptors(FileInterceptor('file'))
+  completeSimpleTaskWithPhoto(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body('operationId') operationId: string,
+    @UploadedFile() file: UploadedArtifactFile,
+  ) {
+    return this.tasks.completeSimpleTaskWithPhoto(user, id, operationId, file);
   }
 
   @Patch(':id/start')

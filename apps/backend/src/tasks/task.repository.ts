@@ -15,7 +15,9 @@ interface CreateTaskData {
 interface UpdateTaskData {
   status?: TaskStatus;
   assigneeId?: string | null;
+  startedAt?: Date | null;
   completedAt?: Date | null;
+  completedWorkShiftId?: string | null;
 }
 
 @Injectable()

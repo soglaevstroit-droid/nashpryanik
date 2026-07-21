@@ -36,6 +36,54 @@ export class TaskMessageService {
     });
   }
 
+  async resume(user: AuthUser, taskId: string, body: string) {
+    await this.shiftAccess.assertActiveShift(user);
+    const message = requiredBody(body);
+    const task = await this.workerTask(user, taskId);
+    if (task.status !== 'PAUSED')
+      throw new BadRequestException('Only a paused task can be resumed');
+    if (task.accessStatus !== 'OPEN')
+      throw new BadRequestException('Only an available task can be resumed');
+    if (task.isWorkBlocked)
+      throw new BadRequestException('Task continuation was stopped by manager');
+    const activeTask = await this.database.task.findFirst({
+      where: {
+        assigneeId: user.id,
+        status: 'IN_PROGRESS',
+        accessStatus: 'OPEN',
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (activeTask && activeTask.id !== task.id)
+      throw new BadRequestException('ANOTHER_TASK_IS_ACTIVE');
+    const step = currentStep(task.steps);
+    const pauseRequest = await this.database.taskMessage.findFirst({
+      where: { taskId, kind: 'PAUSE_REQUEST' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    return this.database.$transaction(async (client) => {
+      const created = await client.taskMessage.create({
+        data: {
+          taskId,
+          taskStepId: step?.id,
+          senderId: user.id,
+          parentId: pauseRequest?.id,
+          kind: 'WORK_RESUMED',
+          body: message,
+        },
+      });
+      const updated = await client.task.updateMany({
+        where: { id: taskId, status: 'PAUSED', isWorkBlocked: false },
+        data: { status: 'IN_PROGRESS' },
+      });
+      if (updated.count !== 1) throw new BadRequestException('Task state has changed');
+      await this.createEvent(client, user, task, step, 'TASK_RESUMED', created.id, message);
+      return created;
+    });
+  }
+
   async help(user: AuthUser, taskId: string, body: string) {
     await this.shiftAccess.assertActiveShift(user);
     const message = requiredBody(body);
@@ -71,10 +119,10 @@ export class TaskMessageService {
         },
       },
     });
-    if (!request || request.kind === 'MANAGER_REPLY')
+    if (!request || !['PAUSE_REQUEST', 'HELP_REQUEST'].includes(request.kind))
       throw new NotFoundException('Message not found');
     const duplicate = await this.database.taskMessage.findFirst({
-      where: { parentId: request.id, kind: 'MANAGER_REPLY' },
+      where: { parentId: request.id, kind: { in: ['MANAGER_REPLY', 'WORK_RESUMED'] } },
     });
     if (duplicate) throw new BadRequestException('Message was already answered');
     const step =
@@ -172,12 +220,26 @@ export class TaskMessageService {
     return updated;
   }
 
-  managerMessages() {
-    return this.database.taskMessage.findMany({
-      where: { kind: { in: ['PAUSE_REQUEST', 'HELP_REQUEST'] } },
+  async managerMessages() {
+    const messages = await this.database.taskMessage.findMany({
+      where: {
+        kind: { in: ['PAUSE_REQUEST', 'WORK_RESUMED', 'HELP_REQUEST', 'MANAGER_REPLY'] },
+      },
       include: { task: { include: { object: true } } },
       orderBy: { createdAt: 'desc' },
     });
+    const resolvedRequestIds = new Set(
+      messages.flatMap((message) =>
+        ['WORK_RESUMED', 'MANAGER_REPLY'].includes(message.kind) && message.parentId
+          ? [message.parentId]
+          : [],
+      ),
+    );
+    return messages.filter(
+      (message) =>
+        message.kind === 'WORK_RESUMED' ||
+        (message.kind !== 'MANAGER_REPLY' && !resolvedRequestIds.has(message.id)),
+    );
   }
 
   async archive(user: AuthUser, manager = false) {
@@ -228,7 +290,7 @@ export class TaskMessageService {
     user: AuthUser,
     task: Awaited<ReturnType<TaskMessageService['workerTask']>>,
     step: { id: string; title: string } | null | undefined,
-    type: 'TASK_PAUSED' | 'HELP_REQUEST',
+    type: 'TASK_PAUSED' | 'TASK_RESUMED' | 'HELP_REQUEST',
     messageId: string,
     body: string,
   ) {
@@ -241,12 +303,13 @@ export class TaskMessageService {
         objectId: task.objectId,
         taskId: task.id,
         taskStepId: step?.id,
-        payload: { action: type, messageId },
+        payload: { action: type, messageId, reason: body },
         metadata: {
           objectName: task.object?.name,
           taskTitle: task.title,
           stepTitle: step?.title,
           message: body,
+          reason: body,
         },
       },
       client,

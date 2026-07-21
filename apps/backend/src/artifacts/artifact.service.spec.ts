@@ -341,6 +341,58 @@ test('worker can read a cloned task photo assigned to that worker', async () => 
   assert.deepEqual(storageEvents, ['get:photos/worker-1/2026-07-09/photo.jpg']);
 });
 
+test('worker can read manager reference photos of an open shared task', async () => {
+  const storageEvents: string[] = [];
+  const database = {
+    task: {
+      findUnique: async () => ({
+        assigneeId: null,
+        status: 'ASSIGNED',
+        accessStatus: 'OPEN',
+        deletedAt: null,
+      }),
+    },
+  };
+  const service = new ArtifactService(
+    createRepository([createArtifact({ uploadedBy: 'foreman-1' })]),
+    createStorage(storageEvents),
+    createEventService([]),
+    database as never,
+  );
+
+  await service.getPhotoPreview(user, 'artifact-1');
+  assert.deepEqual(storageEvents, ['get:photos/worker-1/2026-07-09/photo.jpg']);
+});
+
+test('simple active task accepts task-level worker photos without a synthetic step', async () => {
+  const storageEvents: string[] = [];
+  const database = {
+    task: {
+      findFirst: async () => ({
+        id: 'task-1',
+        assigneeId: user.id,
+        status: 'IN_PROGRESS',
+        accessStatus: 'OPEN',
+        isWorkBlocked: false,
+        steps: [],
+      }),
+    },
+    $transaction: async (action: (client: object) => unknown) => action({}),
+  };
+  const service = new ArtifactService(
+    createRepository(),
+    createStorage(storageEvents),
+    createEventService([]),
+    database as never,
+    { assertActiveShift: async () => undefined } as never,
+  );
+
+  const artifact = await service.uploadPhoto(user, { taskId: 'task-1' }, createFile());
+  assert.equal(artifact.taskId, 'task-1');
+  assert.equal(artifact.taskStepId, null);
+  assert.equal(storageEvents.length, 1);
+});
+
 test('worker cannot read an unrelated worker photo', async () => {
   const service = new ArtifactService(
     createRepository([createArtifact({ uploadedBy: 'worker-2' })]),

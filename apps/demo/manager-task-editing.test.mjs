@@ -25,7 +25,7 @@ test('the create composer is reused in explicit edit mode with current values', 
 test('completed steps are readonly while unfinished steps remain editable', () => {
   assert.match(app, /step\?\.status === 'COMPLETED' \? 'readonly' : ''/);
   assert.match(app, /Выполненный этап защищён от изменений/);
-  assert.match(app, /removeButton\.hidden = cards\.length === 1 \|\| isCompleted/);
+  assert.match(app, /removeButton\.hidden = isCompleted/);
   assert.match(css, /\.managerStepFields\.is-readonly/);
 });
 

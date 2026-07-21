@@ -93,6 +93,11 @@
           <div id="workerObjectsList"><p>Загружаем задачи…</p></div>
         </section>
 
+        <section id="analystLiveView" class="view analystLiveView">
+          <div class="sectionTitle"><h1>Сотрудники</h1></div>
+          <div id="analystWorkersList" class="analystWorkersList" aria-live="polite"></div>
+        </section>
+
         <section id="historyView" class="view">
           <div class="pageHead"><h1 id="historyHeading">История</h1></div>
           <div id="historyList"><p>Загружаем историю…</p></div>
@@ -167,7 +172,7 @@
             </div>
             <div id="taskPhotos" class="detailPhotoGallery"></div>
             <p id="taskObject" class="taskLocation">Пряник / Этаж 3 / Пом. 314</p>
-            <div class="taskProgressBlock">
+            <div id="taskDetailProgress" class="taskProgressBlock">
               <div class="taskProgressLine">
                 <span><i id="taskDetailProgressLine"></i></span
                 ><b id="taskDetailProgressPercent">0%</b>
@@ -177,10 +182,14 @@
           </article>
           <div hidden aria-hidden="true">
             <span id="taskMeta"></span>
-            <p id="taskDescription"></p>
             <p id="taskAssignee"></p>
           </div>
-          <section class="whiteCard stepTimelineCard">
+          <section id="taskDescriptionCard" class="whiteCard taskDescriptionCard">
+            <h3>Описание</h3>
+            <p id="taskDescription"></p>
+            <div id="simpleTaskActions" class="simpleTaskActions" hidden></div>
+          </section>
+          <section id="stepTimelineCard" class="whiteCard stepTimelineCard">
             <h2 class="stepWorkflowTitle">Этапы работ</h2>
             <div id="stepsList" class="stepTimeline"></div>
             <div id="taskPauseInfo" class="stepWorkflowFooter" hidden></div>
@@ -371,7 +380,8 @@
 
         <nav class="bottomNav" aria-label="Основная навигация">
           <button class="is-active" type="button" data-section="tasks" aria-current="page">
-            <span class="navBriefcase" aria-hidden="true"></span><span>Задачи</span>
+            <span class="navBriefcase" aria-hidden="true"></span
+            ><span id="tasksNavLabel">Задачи</span>
           </button>
           <button type="button" data-section="messages">
             <span class="navChat" aria-hidden="true"></span><span>Сообщения</span>
@@ -423,6 +433,13 @@
             <video id="shiftCameraVideo" playsinline muted></video>
             <img id="shiftCameraPreview" alt="" hidden />
             <canvas id="shiftCameraCanvas" hidden></canvas>
+            <input
+              id="shiftCameraFileInput"
+              type="file"
+              accept="image/jpeg,image/webp"
+              capture="environment"
+              hidden
+            />
             <div id="shiftCameraState" class="cameraState">Открываем камеру...</div>
             <button
               id="shiftCameraFlipButton"
@@ -485,7 +502,7 @@
               placeholder="Напишите причину..."
               data-pause-reason
             ></textarea>
-            <small id="pauseReasonError" hidden>Укажите причину паузы</small>
+            <small id="pauseReasonError" hidden>Укажите причину</small>
           </div>
           <div class="taskStatusConfirmActions">
             <button class="secondaryButton" type="button" data-cancel-task-status>Отмена</button>
@@ -622,9 +639,13 @@
                 </label>
 
                 <label class="managerField" for="managerDescription">
-                  <span class="managerFieldLabel">Описание</span>
+                  <span class="managerFieldLabel"
+                    >Описание <i class="requiredMark" aria-hidden="true">*</i></span
+                  >
                   <textarea
                     id="managerDescription"
+                    required
+                    aria-required="true"
                     placeholder="Подробное описание задачи, материалы, требования…"
                   ></textarea>
                 </label>
@@ -705,11 +726,9 @@
 
                 <div class="managerAssignmentRow">
                   <label class="managerField" for="managerWorker">
-                    <span class="managerFieldLabel"
-                      >Исполнитель <i class="requiredMark" aria-hidden="true">*</i></span
-                    >
+                    <span class="managerFieldLabel">Ответственный</span>
                     <span class="managerSelectShell managerWorkerSelectShell">
-                      <select id="managerWorker" required aria-required="true"></select>
+                      <select id="managerWorker"></select>
                     </span>
                   </label>
                   <label class="managerField" for="managerPosition">
@@ -809,6 +828,7 @@
     <script src="/photo-slider.js"></script>
     <script src="/photo-placeholder.js"></script>
     <script src="/camera-utils.js"></script>
+    <script src="/analyst-timeline.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

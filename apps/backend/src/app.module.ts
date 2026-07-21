@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AnalystModule } from './analyst/analyst.module.js';
 import { ArtifactModule } from './artifacts/artifact.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { CommonModule } from './common/common.module.js';
@@ -20,6 +21,7 @@ import { WorkerModule } from './worker/worker.module.js';
 
 @Module({
   imports: [
+    AnalystModule,
     AppConfigModule,
     LoggerModule,
     ManagerTaskModule,

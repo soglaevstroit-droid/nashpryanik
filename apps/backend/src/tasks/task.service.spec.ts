@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AuthUser } from '../auth/auth-user.js';
 import { EventService } from '../events/event.service.js';
 import { ProcessRecord } from '../processes/process-record.js';
@@ -33,7 +33,9 @@ function createTask(overrides: Partial<TaskRecord> = {}): TaskRecord {
     creatorId: manager.id,
     assigneeId: null,
     processId: 'process-1',
+    startedAt: null,
     completedAt: null,
+    completedWorkShiftId: null,
     deletedAt: null,
     deletedByUserId: null,
     deletionReason: null,
@@ -209,7 +211,7 @@ test('assigns task', async () => {
   assert.deepEqual(eventTypes, ['TASK_ASSIGNED']);
 });
 
-test('accepts assigned task', async () => {
+test('accepts assigned task and starts it without creating ACCEPTED', async () => {
   const eventTypes: string[] = [];
   const service = new TaskService(
     createRepository([createTask({ status: 'ASSIGNED', assigneeId: worker.id })]),
@@ -219,8 +221,9 @@ test('accepts assigned task', async () => {
 
   const task = await service.acceptTask(worker, 'task-1');
 
-  assert.equal(task.status, 'ACCEPTED');
-  assert.deepEqual(eventTypes, ['TASK_ACCEPTED']);
+  assert.equal(task.status, 'IN_PROGRESS');
+  assert.ok(task.startedAt);
+  assert.deepEqual(eventTypes, ['TASK_STARTED']);
 });
 
 test('starts accepted task', async () => {
@@ -344,7 +347,7 @@ test('rejects worker action on another worker task', async () => {
     createProcessService([]),
   );
 
-  await assert.rejects(() => service.acceptTask(worker, 'task-1'), BadRequestException);
+  await assert.rejects(() => service.acceptTask(worker, 'task-1'), ConflictException);
 });
 
 test('worker task actions require an active shift before reading the task', async () => {
@@ -384,7 +387,10 @@ test('confirmed task completion is transactional and idempotent', async () => {
         task
       ),
     },
-    taskStep: { count: async () => 0 },
+    taskStep: {
+      count: async ({ where }: { where: { status?: unknown } }) => (where.status ? 0 : 1),
+    },
+    workShift: { findFirst: async () => ({ id: 'shift-1' }) },
     process: {
       update: async ({ data }: { data: { status: string } }) => ((processStatus = data.status), {}),
     },
@@ -414,6 +420,292 @@ test('confirmed task completion is transactional and idempotent', async () => {
   await service.completeTask(worker, task.id, 'task-operation-1');
   await service.completeTask(worker, task.id, 'task-operation-1');
   assert.equal(task.status, 'COMPLETED');
+  assert.equal(task.completedWorkShiftId, 'shift-1');
   assert.equal(processStatus, 'COMPLETED');
   assert.deepEqual(eventTypes, ['TASK_COMPLETED']);
+});
+
+test('a shared task is atomically claimed by only one worker and starts immediately', async () => {
+  const task = {
+    ...createTask({ status: 'ASSIGNED', assigneeId: null }),
+    object: { name: 'Пряник' },
+    steps: [],
+  };
+  let claimedBy: string | null = null;
+  const eventTypes: string[] = [];
+  const client = {
+    task: {
+      findFirst: async ({ where }: { where: { id?: string } }) =>
+        where.id ? task : claimedBy ? { id: task.id } : null,
+      count: async () => 0,
+      updateMany: async ({
+        where,
+        data,
+      }: {
+        where: { id?: string };
+        data: { assigneeId?: string };
+      }) => {
+        if (!where.id) return { count: 0 };
+        if (claimedBy) return { count: 0 };
+        claimedBy = data.assigneeId ?? null;
+        return { count: 1 };
+      },
+      findUnique: async () => ({
+        ...task,
+        assigneeId: claimedBy,
+        status: 'IN_PROGRESS',
+        startedAt: new Date(),
+      }),
+    },
+    taskStep: { update: async () => ({}) },
+  };
+  const database = {
+    $transaction: async (action: (value: typeof client) => unknown) => action(client),
+  };
+  const events = {
+    createEvent: async ({ type }: { type: string }) => {
+      eventTypes.push(type);
+      return { id: `event-${eventTypes.length}` };
+    },
+  };
+  const service = new TaskService(
+    createRepository([task]),
+    events as never,
+    createProcessService([]),
+    database as never,
+    { assertActiveShift: async () => undefined } as never,
+  );
+  const worker2 = { ...worker, id: 'worker-2' };
+  const results = await Promise.allSettled([
+    service.acceptTask(worker, task.id),
+    service.acceptTask(worker2, task.id),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+  assert.ok(['worker-1', 'worker-2'].includes(claimedBy ?? ''));
+  assert.deepEqual(eventTypes, ['TASK_STARTED']);
+});
+
+test('worker with another active task cannot accept an assigned or shared task', async () => {
+  const task = {
+    ...createTask({ status: 'ASSIGNED', assigneeId: null }),
+    object: null,
+    steps: [],
+  };
+  const client = {
+    task: {
+      findFirst: async ({ where }: { where: { id?: string } }) =>
+        where.id ? task : { id: 'another-task' },
+    },
+  };
+  const service = new TaskService(
+    createRepository([task]),
+    createEventService([]),
+    createProcessService([]),
+    {
+      $transaction: async (action: (value: typeof client) => unknown) => action(client),
+    } as never,
+    { assertActiveShift: async () => undefined } as never,
+  );
+
+  await assert.rejects(service.acceptTask(worker, task.id), /ANOTHER_TASK_IS_ACTIVE/);
+});
+
+test('simple task completion stores the final photo before linking completion to the shift', async () => {
+  const task = {
+    ...createTask({ status: 'IN_PROGRESS', assigneeId: worker.id }),
+    startedAt: new Date('2026-07-20T10:00:00Z'),
+    object: { name: 'Пряник' },
+    steps: [],
+  };
+  const writes: string[] = [];
+  const client = {
+    event: { findUnique: async () => null },
+    task: {
+      findFirst: async () => task,
+      updateMany: async ({ data }: { data: Partial<TaskRecord> }) => {
+        writes.push('completed');
+        Object.assign(task, data);
+        return { count: 1 };
+      },
+      findUnique: async () => task,
+    },
+    workShift: { findFirst: async () => ({ id: 'shift-1' }) },
+    artifact: { count: async () => 1 },
+    process: { update: async () => (writes.push('process'), {}) },
+  };
+  const database = {
+    event: { findUnique: async () => null },
+    $transaction: async (action: (value: typeof client) => unknown) => action(client),
+  };
+  const artifacts = {
+    preparePhotoObject: () => ({ storageKey: 'original.jpg', preview: null }),
+    storePreparedPhoto: async () => writes.push('stored'),
+    createPhotoArtifactRecord: async () => (writes.push('artifact'), { id: 'completion-photo' }),
+    deleteStoredPhoto: async () => writes.push('deleted'),
+  };
+  const events = {
+    createEvent: async ({ type }: { type: string }) => (
+      writes.push(type),
+      { id: 'completion-event' }
+    ),
+  };
+  const service = new TaskService(
+    createRepository([task]),
+    events as never,
+    createProcessService([]),
+    database as never,
+    { assertActiveShift: async () => undefined } as never,
+    artifacts as never,
+  );
+  const result = await service.completeSimpleTaskWithPhoto(
+    worker,
+    task.id,
+    'complete-1',
+    {} as never,
+  );
+
+  assert.equal(result.task.status, 'COMPLETED');
+  assert.equal(result.task.completedWorkShiftId, 'shift-1');
+  assert.equal(result.artifact.id, 'completion-photo');
+  assert.deepEqual(writes, ['stored', 'artifact', 'completed', 'process', 'TASK_COMPLETED']);
+});
+
+test('failed final photo storage leaves a simple task IN_PROGRESS', async () => {
+  const task = {
+    ...createTask({ status: 'IN_PROGRESS', assigneeId: worker.id }),
+    startedAt: new Date('2026-07-20T10:00:00Z'),
+    object: null,
+    steps: [],
+  };
+  let completed = false;
+  const client = {
+    event: { findUnique: async () => null },
+    task: {
+      findFirst: async () => task,
+      updateMany: async () => ((completed = true), { count: 1 }),
+    },
+    workShift: { findFirst: async () => ({ id: 'shift-1' }) },
+    artifact: { count: async () => 1 },
+  };
+  const service = new TaskService(
+    createRepository([task]),
+    createEventService([]),
+    createProcessService([]),
+    {
+      event: { findUnique: async () => null },
+      $transaction: async (action: (value: typeof client) => unknown) => action(client),
+    } as never,
+    { assertActiveShift: async () => undefined } as never,
+    {
+      preparePhotoObject: () => ({ storageKey: 'original.jpg', preview: null }),
+      storePreparedPhoto: async () => {
+        throw new Error('storage failed');
+      },
+      deleteStoredPhoto: async () => undefined,
+    } as never,
+  );
+
+  await assert.rejects(
+    service.completeSimpleTaskWithPhoto(worker, task.id, 'complete-2', {} as never),
+    /storage failed/,
+  );
+  assert.equal(completed, false);
+  assert.equal(task.status, 'IN_PROGRESS');
+});
+
+test('simple task completion rejects an initial manager photo without worker progress photo', async () => {
+  const startedAt = new Date('2026-07-20T10:00:00Z');
+  const task = {
+    ...createTask({ status: 'IN_PROGRESS', assigneeId: worker.id }),
+    startedAt,
+    object: null,
+    steps: [],
+  };
+  let progressWhere: unknown;
+  let stored = false;
+  const client = {
+    event: { findUnique: async () => null },
+    task: { findFirst: async () => task },
+    workShift: { findFirst: async () => ({ id: 'shift-1' }) },
+    artifact: {
+      count: async ({ where }: { where: unknown }) => ((progressWhere = where), 0),
+    },
+  };
+  const service = new TaskService(
+    createRepository([task]),
+    createEventService([]),
+    createProcessService([]),
+    {
+      event: { findUnique: async () => null },
+      $transaction: async (action: (value: typeof client) => unknown) => action(client),
+    } as never,
+    { assertActiveShift: async () => undefined } as never,
+    {
+      preparePhotoObject: () => ({ storageKey: 'final.jpg', preview: null }),
+      storePreparedPhoto: async () => {
+        stored = true;
+      },
+      deleteStoredPhoto: async () => undefined,
+    } as never,
+  );
+
+  await assert.rejects(
+    service.completeSimpleTaskWithPhoto(worker, task.id, 'complete-without-progress', {} as never),
+    /Сначала добавьте фотографию выполненной работы/,
+  );
+  assert.deepEqual(progressWhere, {
+    taskId: task.id,
+    taskStepId: null,
+    type: 'PHOTO',
+    uploadedBy: worker.id,
+    createdAt: { gte: startedAt },
+  });
+  assert.equal(stored, false);
+  assert.equal(task.status, 'IN_PROGRESS');
+});
+
+test('repeating simple completion with the same operation returns the original result', async () => {
+  const task = {
+    ...createTask({ status: 'COMPLETED', assigneeId: worker.id }),
+    completedWorkShiftId: 'shift-1',
+  };
+  let prepared = false;
+  const database = {
+    event: {
+      findUnique: async ({ where }: { where: { idempotencyKey: string } }) =>
+        where.idempotencyKey.startsWith('task:complete-with-photo:')
+          ? { id: 'completion-event' }
+          : { id: 'photo-event' },
+    },
+    task: { findFirst: async () => task },
+    artifact: {
+      findFirst: async () => ({ id: 'completion-photo', taskId: task.id, eventId: 'photo-event' }),
+    },
+  };
+  const service = new TaskService(
+    createRepository([task]),
+    createEventService([]),
+    createProcessService([]),
+    database as never,
+    { assertActiveShift: async () => undefined } as never,
+    {
+      preparePhotoObject: () => {
+        prepared = true;
+        throw new Error('must not prepare a duplicate photo');
+      },
+    } as never,
+  );
+
+  const result = await service.completeSimpleTaskWithPhoto(
+    worker,
+    task.id,
+    'complete-repeat',
+    {} as never,
+  );
+
+  assert.equal(result.task.status, 'COMPLETED');
+  assert.equal(result.artifact.id, 'completion-photo');
+  assert.equal(prepared, false);
 });

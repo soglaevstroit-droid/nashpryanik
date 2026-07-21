@@ -1,5 +1,12 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma, TaskPriority, TaskStatus } from '@prisma/client';
+import { ArtifactService } from '../artifacts/artifact.service.js';
+import { UploadedArtifactFile } from '../artifacts/uploaded-artifact-file.js';
 import { AuthUser } from '../auth/auth-user.js';
 import { EventService } from '../events/event.service.js';
 import { EventType } from '../events/event-types.js';
@@ -21,6 +28,7 @@ export class TaskService {
     private readonly processes: ProcessService,
     private readonly database?: DatabaseService,
     private readonly activeShiftAccess?: ActiveShiftAccessService,
+    private readonly artifacts?: ArtifactService,
   ) {}
 
   async createTask(user: AuthUser, dto: CreateTaskDto): Promise<TaskRecord> {
@@ -67,24 +75,158 @@ export class TaskService {
   }
 
   async acceptTask(user: AuthUser, id: string): Promise<TaskRecord> {
-    const task = await this.prepareWorkerTransition(user, id, ['ASSIGNED'], 'accept');
-    const snapshot = await this.eventSnapshot(user, task);
-    return this.transaction(async (client) => {
-      const current = await this.repository.findById(id, client);
-      if (!current || current.status !== 'ASSIGNED')
-        throw new BadRequestException('Task was already accepted');
-      const updated = await this.repository.update(id, { status: 'ACCEPTED' }, client);
+    assertAuthUser(user);
+    if (user.role !== 'WORKER') throw new BadRequestException('Only a worker can accept a task');
+    await this.activeShiftAccess?.assertActiveShift(user);
+
+    if (!this.database) {
+      const task = await this.getTask(id);
+      if (task.status === 'IN_PROGRESS' && task.assigneeId === user.id) return task;
+      this.assertTransition(task, ['ASSIGNED', 'ACCEPTED'], 'accept');
+      if (task.assigneeId && task.assigneeId !== user.id)
+        throw new ConflictException('Задача уже принята другим сотрудником');
+      const snapshot = await this.eventSnapshot(user, task);
+      const updated = await this.repository.update(id, {
+        assigneeId: user.id,
+        status: 'IN_PROGRESS',
+        startedAt: new Date(),
+      });
       await this.createTaskEvent(
         user,
         updated,
-        'TASK_ACCEPTED',
-        'TASK_ACCEPTED',
+        'TASK_STARTED',
+        'TASK_ACCEPTED_AND_STARTED',
         {},
-        client,
+        undefined,
         snapshot,
       );
       return updated;
-    });
+    }
+
+    try {
+      return await this.database.$transaction(
+        async (client) => {
+          const task = await client.task.findFirst({
+            where: { id, deletedAt: null },
+            include: {
+              object: { select: { name: true } },
+              steps: { where: { deletedAt: null }, orderBy: { order: 'asc' } },
+            },
+          });
+          if (!task) throw new NotFoundException('Task not found');
+          if (task.status === 'IN_PROGRESS' && task.assigneeId === user.id) return task;
+          if (!['ASSIGNED', 'ACCEPTED'].includes(task.status))
+            throw new BadRequestException(`Task cannot accept from status ${task.status}`);
+          if (task.assigneeId && task.assigneeId !== user.id)
+            throw new ConflictException('Задача уже принята другим сотрудником');
+          if (task.accessStatus !== 'OPEN' || task.isWorkBlocked)
+            throw new BadRequestException('TASK_ACCESS_CLOSED');
+
+          const activeTask = await client.task.findFirst({
+            where: {
+              assigneeId: user.id,
+              status: 'IN_PROGRESS',
+              accessStatus: 'OPEN',
+              deletedAt: null,
+            },
+            select: { id: true },
+          });
+          if (activeTask && activeTask.id !== task.id)
+            throw new BadRequestException('ANOTHER_TASK_IS_ACTIVE');
+
+          const destinationPosition = task.assigneeId
+            ? task.position
+            : (await client.task.count({
+                where: { assigneeId: user.id, deletedAt: null },
+              })) + 1;
+          const startedAt = new Date();
+          const claimed = await client.task.updateMany({
+            where: {
+              id: task.id,
+              status: { in: ['ASSIGNED', 'ACCEPTED'] },
+              accessStatus: 'OPEN',
+              deletedAt: null,
+              OR: [{ assigneeId: user.id }, { assigneeId: null }],
+            },
+            data: {
+              assigneeId: user.id,
+              status: 'IN_PROGRESS',
+              startedAt,
+              position: destinationPosition,
+            },
+          });
+          if (claimed.count !== 1)
+            throw new ConflictException('Задача уже принята другим сотрудником');
+          if (!task.assigneeId)
+            await client.task.updateMany({
+              where: {
+                assigneeId: null,
+                deletedAt: null,
+                position: { gt: task.position },
+              },
+              data: { position: { decrement: 1 } },
+            });
+
+          const firstStep = task.steps.find((step) =>
+            ['CREATED', 'REOPENED'].includes(step.status),
+          );
+          if (firstStep) {
+            const startedStep = await client.taskStep.update({
+              where: { id: firstStep.id },
+              data: { status: 'IN_PROGRESS', startedAt },
+            });
+            await this.events.createEvent(
+              {
+                type: 'STEP_STARTED',
+                actorId: user.id,
+                entityType: 'task_step',
+                entityId: startedStep.id,
+                objectId: task.objectId,
+                taskId: task.id,
+                taskStepId: startedStep.id,
+                payload: { action: 'STEP_STARTED', order: startedStep.order },
+                metadata: {
+                  actorName: user.email,
+                  objectName: task.object?.name ?? null,
+                  taskTitle: task.title,
+                  stepTitle: startedStep.title,
+                },
+              },
+              client,
+            );
+          }
+          await this.events.createEvent(
+            {
+              type: 'TASK_STARTED',
+              actorId: user.id,
+              entityType: 'task',
+              entityId: task.id,
+              objectId: task.objectId,
+              taskId: task.id,
+              payload: {
+                action: 'TASK_ACCEPTED_AND_STARTED',
+                assigneeId: user.id,
+                startedAt,
+              },
+              metadata: {
+                actorName: user.email,
+                objectName: task.object?.name ?? null,
+                taskTitle: task.title,
+              },
+            },
+            client,
+          );
+          const updated = await client.task.findUnique({ where: { id: task.id } });
+          if (!updated) throw new NotFoundException('Task not found');
+          return updated;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (isSerializableConflict(error))
+        throw new ConflictException('Задача уже принята другим сотрудником');
+      throw error;
+    }
   }
 
   async startTask(user: AuthUser, id: string): Promise<TaskRecord> {
@@ -94,7 +236,11 @@ export class TaskService {
       const current = await this.repository.findById(id, client);
       if (!current || current.status !== 'ACCEPTED')
         throw new BadRequestException('Task was already started');
-      const updated = await this.repository.update(task.id, { status: 'IN_PROGRESS' }, client);
+      const updated = await this.repository.update(
+        task.id,
+        { status: 'IN_PROGRESS', startedAt: task.startedAt ?? new Date() },
+        client,
+      );
       await this.createTaskEvent(
         user,
         updated,
@@ -139,6 +285,162 @@ export class TaskService {
     await this.createTaskEvent(user, updated, 'TASK_SENT_TO_REVIEW', 'TASK_SENT_TO_REVIEW');
 
     return updated;
+  }
+
+  async completeSimpleTaskWithPhoto(
+    user: AuthUser,
+    id: string,
+    requestedOperationId: string,
+    file: UploadedArtifactFile,
+  ) {
+    assertAuthUser(user);
+    if (user.role !== 'WORKER') throw new BadRequestException('Only a worker can complete a task');
+    await this.activeShiftAccess?.assertActiveShift(user);
+    if (!this.database || !this.artifacts)
+      throw new BadRequestException('Task photo completion is unavailable');
+    const operationId = requestedOperationId?.trim();
+    if (!operationId || operationId.length > 120)
+      throw new BadRequestException('operationId is required');
+    const completionKey = `task:complete-with-photo:${user.id}:${operationId}`;
+    const existing = await this.findSimpleCompletionResult(user, id, completionKey, operationId);
+    if (existing) return existing;
+
+    const uploaded = this.artifacts.preparePhotoObject(user, file);
+    let stored = false;
+    try {
+      return await this.database.$transaction(
+        async (client) => {
+          const duplicate = await client.event.findUnique({
+            where: { idempotencyKey: completionKey },
+          });
+          if (duplicate) {
+            const recovered = await this.findSimpleCompletionResult(
+              user,
+              id,
+              completionKey,
+              operationId,
+              client,
+            );
+            if (recovered) return recovered;
+          }
+          const task = await client.task.findFirst({
+            where: { id, assigneeId: user.id, deletedAt: null },
+            include: {
+              object: { select: { name: true } },
+              steps: { where: { deletedAt: null }, select: { id: true } },
+            },
+          });
+          if (!task) throw new NotFoundException('Task not found');
+          if (task.steps.length > 0)
+            throw new BadRequestException('Use the step workflow to complete this task');
+          if (task.status !== 'IN_PROGRESS')
+            throw new BadRequestException('Task cannot be completed now');
+          if (task.accessStatus !== 'OPEN' || task.isWorkBlocked)
+            throw new BadRequestException('Работа по задаче заблокирована');
+          const shift = await client.workShift.findFirst({
+            where: { userId: user.id, status: 'ACTIVE', finishedAt: null },
+            select: { id: true },
+          });
+          if (!shift) throw new BadRequestException('ACTIVE_SHIFT_REQUIRED');
+          const progressPhotos = await client.artifact.count({
+            where: {
+              taskId: task.id,
+              taskStepId: null,
+              type: 'PHOTO',
+              uploadedBy: user.id,
+              ...(task.startedAt ? { createdAt: { gte: task.startedAt } } : {}),
+            },
+          });
+          if (progressPhotos < 1)
+            throw new BadRequestException('Сначала добавьте фотографию выполненной работы');
+
+          await this.artifacts!.storePreparedPhoto(uploaded);
+          stored = true;
+          const artifact = await this.artifacts!.createPhotoArtifactRecord(
+            user,
+            { taskId: task.id, operationId },
+            uploaded,
+            client,
+            {
+              workShiftId: shift.id,
+              eventPayload: { purpose: 'TASK_COMPLETION' },
+              eventMetadata: { purpose: 'TASK_COMPLETION', taskTitle: task.title },
+            },
+          );
+          const completedAt = new Date();
+          const completed = await client.task.updateMany({
+            where: {
+              id: task.id,
+              assigneeId: user.id,
+              status: 'IN_PROGRESS',
+              accessStatus: 'OPEN',
+              deletedAt: null,
+            },
+            data: {
+              status: 'COMPLETED',
+              completedAt,
+              completedWorkShiftId: shift.id,
+            },
+          });
+          if (completed.count !== 1)
+            throw new ConflictException('Task state changed during completion');
+          await client.process.update({
+            where: { id: task.processId },
+            data: { status: 'COMPLETED', finishedAt: completedAt },
+          });
+          await this.events.createEvent(
+            {
+              type: 'TASK_COMPLETED',
+              actorId: user.id,
+              entityType: 'task',
+              entityId: task.id,
+              objectId: task.objectId,
+              taskId: task.id,
+              workShiftId: shift.id,
+              idempotencyKey: completionKey,
+              payload: {
+                action: 'TASK_COMPLETED_WITH_PHOTO',
+                artifactId: artifact.id,
+                status: 'COMPLETED',
+              },
+              metadata: {
+                actorName: user.email,
+                objectName: task.object?.name ?? null,
+                taskTitle: task.title,
+                completionPhotoId: artifact.id,
+              },
+            },
+            client,
+          );
+          const result = await client.task.findUnique({ where: { id: task.id } });
+          if (!result) throw new NotFoundException('Task not found');
+          return { task: result, artifact };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (isSerializableConflict(error)) {
+        try {
+          const recovered = await this.findSimpleCompletionResult(
+            user,
+            id,
+            completionKey,
+            operationId,
+          );
+          if (recovered) return recovered;
+        } catch (recoveryError) {
+          if (stored)
+            await this.artifacts.deleteStoredPhoto(
+              uploaded.storageKey,
+              uploaded.preview?.storageKey,
+            );
+          throw recoveryError;
+        }
+      }
+      if (stored)
+        await this.artifacts.deleteStoredPhoto(uploaded.storageKey, uploaded.preview?.storageKey);
+      throw error;
+    }
   }
 
   async completeTask(
@@ -187,14 +489,24 @@ export class TaskService {
           throw new BadRequestException('Task cannot be completed now');
         if (current.isWorkBlocked || current.accessStatus === 'CLOSED')
           throw new BadRequestException('Работа по задаче заблокирована');
+        const stepsCount = await client.taskStep.count({
+          where: { taskId: task.id, deletedAt: null },
+        });
+        if (stepsCount === 0)
+          throw new BadRequestException('A completion photo is required for a task without steps');
         const incompleteSteps = await client.taskStep.count({
           where: { taskId: task.id, deletedAt: null, status: { not: 'COMPLETED' } },
         });
         if (incompleteSteps > 0) throw new BadRequestException('Complete all task steps first');
+        const shift = await client.workShift.findFirst({
+          where: { userId: user.id, status: 'ACTIVE', finishedAt: null },
+          select: { id: true },
+        });
+        if (!shift) throw new BadRequestException('ACTIVE_SHIFT_REQUIRED');
         const completedAt = new Date();
         const result = await client.task.update({
           where: { id: task.id },
-          data: { status: 'COMPLETED', completedAt },
+          data: { status: 'COMPLETED', completedAt, completedWorkShiftId: shift.id },
         });
         await client.process.update({
           where: { id: result.processId },
@@ -208,6 +520,7 @@ export class TaskService {
             entityId: result.id,
             objectId: result.objectId,
             taskId: result.id,
+            workShiftId: shift.id,
             idempotencyKey,
             payload: { action: 'TASK_COMPLETED', status: result.status },
             metadata: snapshot as Prisma.InputJsonObject,
@@ -283,6 +596,30 @@ export class TaskService {
     return this.repository.findManyByAssigneeId(user.id, defaultTaskListLimit);
   }
 
+  private async findSimpleCompletionResult(
+    user: AuthUser,
+    taskId: string,
+    completionKey: string,
+    operationId: string,
+    client: Prisma.TransactionClient | DatabaseService = this.database!,
+  ) {
+    const completionEvent = await client.event.findUnique({
+      where: { idempotencyKey: completionKey },
+    });
+    if (!completionEvent) return null;
+    const task = await client.task.findFirst({
+      where: { id: taskId, assigneeId: user.id, deletedAt: null },
+    });
+    const photoEvent = await client.event.findUnique({
+      where: { idempotencyKey: `photo:${user.id}:${operationId}` },
+    });
+    const artifact = photoEvent
+      ? await client.artifact.findFirst({ where: { eventId: photoEvent.id, taskId } })
+      : null;
+    if (!task || !artifact) throw new ConflictException('Completion operation is inconsistent');
+    return { task, artifact };
+  }
+
   private async prepareWorkerTransition(
     user: AuthUser,
     id: string,
@@ -321,7 +658,12 @@ export class TaskService {
     }
     if (!this.database) return;
     const active = await this.database.task.findFirst({
-      where: { assigneeId: user.id, status: 'IN_PROGRESS', deletedAt: null },
+      where: {
+        assigneeId: user.id,
+        status: 'IN_PROGRESS',
+        accessStatus: 'OPEN',
+        deletedAt: null,
+      },
       select: { id: true },
     });
     if (active && active.id !== task.id) throw new BadRequestException('ANOTHER_TASK_IS_ACTIVE');
@@ -407,6 +749,12 @@ function assertAuthUser(user: AuthUser): void {
   if (!user?.id) {
     throw new BadRequestException('Authenticated user is required');
   }
+}
+
+function isSerializableConflict(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError && ['P2002', 'P2034'].includes(error.code)
+  );
 }
 
 function assertCreateTaskDto(dto: CreateTaskDto): void {

@@ -34,6 +34,7 @@ enum EventType {
   TASK_ASSIGNED
   TASK_ACCEPTED
   TASK_STARTED
+  TASK_RESUMED
   TASK_PAUSED
   TASK_SENT_TO_REVIEW
   TASK_COMPLETED
@@ -130,6 +131,7 @@ enum TaskStatus {
 
 enum TaskMessageKind {
   PAUSE_REQUEST
+  WORK_RESUMED
   HELP_REQUEST
   MANAGER_REPLY
   TASK_UPDATED
@@ -248,16 +250,17 @@ model User {
 }
 
 model WorkShift {
-  id         String           @id @default(uuid())
-  userId     String
-  processId  String?
-  status     WorkShiftStatus  @default(ACTIVE)
-  startedAt  DateTime
-  finishedAt DateTime?
-  createdAt  DateTime         @default(now())
-  updatedAt  DateTime         @updatedAt
-  photos     WorkShiftPhoto[]
-  accrual    ShiftAccrual?
+  id             String           @id @default(uuid())
+  userId         String
+  processId      String?
+  status         WorkShiftStatus  @default(ACTIVE)
+  startedAt      DateTime
+  finishedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  photos         WorkShiftPhoto[]
+  accrual        ShiftAccrual?
+  completedTasks Task[]
 
   @@index([userId])
   @@index([status])
@@ -296,31 +299,34 @@ model ShiftAccrual {
 }
 
 model Task {
-  id                  String              @id @default(uuid())
-  title               String
-  description         String?
-  location            String?
-  status              TaskStatus          @default(CREATED)
-  priority            TaskPriority        @default(NORMAL)
-  accessStatus        TaskAccessStatus    @default(OPEN)
-  position            Int                 @default(1)
-  creatorId           String
-  assigneeId          String?
-  processId           String
-  objectId            String?
-  completedAt         DateTime?
-  deletedAt           DateTime?
-  deletedByUserId     String?
-  deletionReason      String?
-  creationOperationId String?             @unique
-  isWorkBlocked       Boolean             @default(false)
-  workBlockedAt       DateTime?
-  workBlockedByUserId String?
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
-  object              ConstructionObject? @relation(fields: [objectId], references: [id], onDelete: Restrict)
-  steps               TaskStep[]
-  messages            TaskMessage[]
+  id                   String              @id @default(uuid())
+  title                String
+  description          String?
+  location             String?
+  status               TaskStatus          @default(CREATED)
+  priority             TaskPriority        @default(NORMAL)
+  accessStatus         TaskAccessStatus    @default(OPEN)
+  position             Int                 @default(1)
+  creatorId            String
+  assigneeId           String?
+  processId            String
+  objectId             String?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  completedWorkShiftId String?
+  deletedAt            DateTime?
+  deletedByUserId      String?
+  deletionReason       String?
+  creationOperationId  String?             @unique
+  isWorkBlocked        Boolean             @default(false)
+  workBlockedAt        DateTime?
+  workBlockedByUserId  String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  object               ConstructionObject? @relation(fields: [objectId], references: [id], onDelete: Restrict)
+  completedWorkShift   WorkShift?          @relation(fields: [completedWorkShiftId], references: [id], onDelete: Restrict)
+  steps                TaskStep[]
+  messages             TaskMessage[]
 
   @@index([status])
   @@index([priority])
@@ -329,6 +335,7 @@ model Task {
   @@index([assigneeId, status])
   @@index([assigneeId, deletedAt, position])
   @@index([objectId])
+  @@index([completedWorkShiftId])
   @@index([processId])
   @@index([createdAt])
   @@map("tasks")

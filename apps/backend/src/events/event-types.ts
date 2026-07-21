@@ -25,6 +25,7 @@ export const eventTypes = [
   'TASK_ASSIGNED',
   'TASK_ACCEPTED',
   'TASK_STARTED',
+  'TASK_RESUMED',
   'TASK_PAUSED',
   'TASK_SENT_TO_REVIEW',
   'TASK_COMPLETED',

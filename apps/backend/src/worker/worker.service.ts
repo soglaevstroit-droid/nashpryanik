@@ -12,15 +12,37 @@ export class WorkerService {
   ) {}
 
   async getObjectsWithTasks(user: AuthUser) {
+    const activeShift = await this.database.workShift.findFirst({
+      where: { userId: user.id, status: 'ACTIVE', finishedAt: null },
+      select: { id: true },
+    });
     const objects = await this.database.constructionObject.findMany({
       where: { isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       include: {
         tasks: {
           where: {
-            assigneeId: user.id,
             deletedAt: null,
-            status: { notIn: ['COMPLETED', 'CANCELLED'] },
+            OR: [
+              {
+                assigneeId: user.id,
+                status: { notIn: ['COMPLETED', 'CANCELLED'] },
+              },
+              {
+                assigneeId: null,
+                status: 'ASSIGNED',
+                accessStatus: 'OPEN',
+              },
+              ...(activeShift
+                ? [
+                    {
+                      assigneeId: user.id,
+                      status: 'COMPLETED' as const,
+                      completedWorkShiftId: activeShift.id,
+                    },
+                  ]
+                : []),
+            ],
           },
           orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
           include: { steps: { where: { deletedAt: null }, orderBy: [{ order: 'asc' }] } },
@@ -35,12 +57,10 @@ export class WorkerService {
           orderBy: { createdAt: 'desc' },
         })
       : [];
-    const activeShift = await this.database.workShift.findFirst({
-      where: { userId: user.id, status: 'ACTIVE', finishedAt: null },
-      select: { id: true },
-    });
     const allTasks = objects.flatMap((object) => object.tasks);
-    const activeTask = allTasks.find((task) => task.status === 'IN_PROGRESS');
+    const activeTask = allTasks.find(
+      (task) => task.status === 'IN_PROGRESS' && task.accessStatus === 'OPEN',
+    );
     const urgentTask = [...allTasks]
       .filter((task) => task.priority === 'URGENT' && task.accessStatus === 'OPEN')
       .sort(
@@ -50,21 +70,40 @@ export class WorkerService {
     return objects.map((object) => ({
       object: { id: object.id, name: object.name, sortOrder: object.sortOrder },
       activeTasksCount: object.tasks.length,
-      tasks: object.tasks.map((task) => ({
-        ...task,
-        isAccessLocked:
-          !activeShift ||
-          task.accessStatus === 'CLOSED' ||
-          (activeTask ? task.id !== activeTask.id : urgentTask ? task.id !== urgentTask.id : false),
-        photos: photos.filter((photo) => photo.taskId === task.id),
-      })),
+      tasks: [...object.tasks]
+        .sort(
+          (left, right) =>
+            Number(left.status === 'COMPLETED') - Number(right.status === 'COMPLETED') ||
+            left.position - right.position ||
+            left.createdAt.getTime() - right.createdAt.getTime(),
+        )
+        .map((task) => ({
+          ...task,
+          isAccessLocked:
+            !activeShift ||
+            task.accessStatus === 'CLOSED' ||
+            task.status === 'COMPLETED' ||
+            (activeTask
+              ? task.id !== activeTask.id
+              : urgentTask
+                ? task.id !== urgentTask.id
+                : false),
+          photos: photos.filter((photo) => photo.taskId === task.id),
+        })),
     }));
   }
 
   async getTask(user: AuthUser, taskId: string) {
     await this.activeShiftAccess?.assertActiveShift(user);
     const task = await this.database.task.findFirst({
-      where: { id: taskId, assigneeId: user.id, deletedAt: null },
+      where: {
+        id: taskId,
+        deletedAt: null,
+        OR: [
+          { assigneeId: user.id },
+          { assigneeId: null, status: 'ASSIGNED', accessStatus: 'OPEN' },
+        ],
+      },
       include: {
         object: { select: { id: true, name: true } },
         steps: { where: { deletedAt: null }, orderBy: [{ order: 'asc' }, { id: 'asc' }] },
@@ -81,6 +120,7 @@ export class WorkerService {
         select: {
           id: true,
           taskStepId: true,
+          uploadedBy: true,
           mimeType: true,
           originalFileName: true,
           createdAt: true,
@@ -105,6 +145,12 @@ export class WorkerService {
         ...message,
         sender: messageSenders.find((sender) => sender.id === message.senderId) ?? null,
       })),
+      hasWorkerProgressPhoto: artifacts.some(
+        (artifact) =>
+          artifact.taskStepId === null &&
+          artifact.uploadedBy === user.id &&
+          (!task.startedAt || artifact.createdAt >= task.startedAt),
+      ),
       photos: artifacts,
       steps: task.steps.map((step) => ({
         ...step,
@@ -157,7 +203,12 @@ export class WorkerService {
     if (task.accessStatus === 'CLOSED') throw new BadRequestException('TASK_ACCESS_CLOSED');
     if (task.status === 'PAUSED') return;
     const active = await this.database.task.findFirst({
-      where: { assigneeId: userId, status: 'IN_PROGRESS', deletedAt: null },
+      where: {
+        assigneeId: userId,
+        status: 'IN_PROGRESS',
+        accessStatus: 'OPEN',
+        deletedAt: null,
+      },
       select: { id: true },
     });
     if (active && active.id !== task.id) throw new BadRequestException('ANOTHER_TASK_IS_ACTIVE');

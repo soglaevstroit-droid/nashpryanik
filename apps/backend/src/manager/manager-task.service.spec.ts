@@ -95,12 +95,123 @@ test('rejects task creation without a positive integer position before database 
       objectId: 'object-1',
       assigneeId: 'worker-1',
       title: 'Новая задача',
+      description: 'Описание задачи',
       location: 'Этаж 3',
       position: 0,
       steps: [{ title: 'Этап', description: 'Описание' }],
     }),
     BadRequestException,
   );
+});
+
+test('creates an unassigned task with an empty steps array without a synthetic step', async () => {
+  let createdData: Record<string, unknown> | undefined;
+  const createdTask = {
+    id: 'task-simple',
+    assigneeId: null,
+    title: 'Простая задача',
+    description: 'Выполнить работы без этапов',
+    location: 'Этаж 1',
+    status: 'ASSIGNED',
+    steps: [],
+    object: { id: 'object-1', name: 'Пряник' },
+  };
+  const client = {
+    task: {
+      count: async () => 0,
+      updateMany: async () => ({ count: 0 }),
+      create: async ({ data }: { data: Record<string, unknown> }) => (
+        (createdData = data),
+        createdTask
+      ),
+    },
+    process: { create: async () => ({ id: 'process-1' }) },
+  };
+  const database = {
+    task: {
+      findUnique: async () => null,
+      findFirst: async () => ({ ...createdTask, messages: [] }),
+    },
+    constructionObject: { findFirst: async () => ({ id: 'object-1' }) },
+    user: { findMany: async () => [] },
+    artifact: { findMany: async () => [] },
+    $transaction: async (action: (value: typeof client) => unknown) => action(client),
+  };
+  const service = new ManagerTaskService(
+    database as never,
+    { createEvent: async () => ({ id: 'event-1' }) } as never,
+    {} as never,
+  );
+
+  const result = await service.createTask(manager, {
+    operationId: 'simple-create-1',
+    objectId: 'object-1',
+    assigneeId: null,
+    title: 'Простая задача',
+    description: 'Выполнить работы без этапов',
+    location: 'Этаж 1',
+    priority: 'NORMAL',
+    accessStatus: 'OPEN',
+    position: 1,
+    steps: [],
+  });
+
+  assert.equal(result.assigneeId, null);
+  assert.deepEqual((createdData?.steps as { create: unknown[] }).create, []);
+});
+
+test('task creation keeps the existing real step structure when steps are provided', async () => {
+  let stepsCreate: unknown[] = [];
+  const task = {
+    id: 'task-with-steps',
+    assigneeId: 'worker-1',
+    steps: [{ id: 'step-1' }],
+    object: { id: 'object-1' },
+    messages: [],
+  };
+  const client = {
+    task: {
+      count: async () => 0,
+      updateMany: async () => ({}),
+      create: async ({ data }: { data: { steps: { create: unknown[] } } }) => (
+        (stepsCreate = data.steps.create),
+        task
+      ),
+    },
+    process: { create: async () => ({ id: 'process-1' }) },
+  };
+  const database = {
+    task: {
+      findUnique: async () => null,
+      findFirst: async () => task,
+    },
+    user: {
+      findFirst: async () => ({ id: 'worker-1' }),
+      findMany: async () => [{ id: 'worker-1' }],
+    },
+    constructionObject: { findFirst: async () => ({ id: 'object-1' }) },
+    artifact: { findMany: async () => [] },
+    $transaction: async (action: (value: typeof client) => unknown) => action(client),
+  };
+  const service = new ManagerTaskService(
+    database as never,
+    { createEvent: async () => ({ id: 'event-1' }) } as never,
+    {} as never,
+  );
+
+  await service.createTask(manager, {
+    operationId: 'staged-create-1',
+    objectId: 'object-1',
+    assigneeId: 'worker-1',
+    title: 'Задача с этапами',
+    description: 'Поэтапно выполнить работы',
+    location: 'Этаж 2',
+    position: 1,
+    steps: [{ title: 'Первый этап', description: 'Подготовить' }],
+  });
+
+  assert.equal(stepsCreate.length, 1);
+  assert.equal((stepsCreate[0] as { title: string }).title, 'Первый этап');
 });
 
 function editableTask(overrides: Record<string, unknown> = {}) {

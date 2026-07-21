@@ -14,6 +14,7 @@
     "prisma:studio": "node --env-file=../../.env node_modules/prisma/build/index.js studio --schema prisma/schema.prisma",
     "db:check": "npm run build && node dist/database/check-database.js",
     "bootstrap:demo-worker": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/bootstrap-demo-worker.js",
+    "tasks:local:clean": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/clean-local-tasks.js",
     "testdata:extended": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/seed-extended-testdata.js",
     "testdata:extended:clean": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/seed-extended-testdata.js --clean",
     "testdata:clone-ilya-to-work": "npm run prisma:generate && npm run build && node --env-file-if-exists=../../.env dist/database/clone-ilya-to-work.js",

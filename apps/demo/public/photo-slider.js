@@ -48,7 +48,7 @@
       const slides = photos
         .map(
           (photo, index) =>
-            `<article class="photoSlide" data-photo-slide><img data-slider-photo-id="${escapeText(photo.id)}" data-photo-gallery="${escapeText(id)}" alt="${escapeText(photo.originalFileName || 'Фото')}" aria-label="Фото ${index + 1} из ${photos.length}" /><span class="photoLockOverlay" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M12 14v3"/></svg></span></article>`,
+            `<article class="photoSlide${photo.id ? '' : ' is-event-placeholder'}" data-photo-slide data-photo-frame-index="${index}">${photo.id ? `<img data-slider-photo-id="${escapeText(photo.id)}" data-photo-gallery="${escapeText(id)}" alt="${escapeText(photo.originalFileName || 'Фото')}" aria-label="Фото ${index + 1} из ${photos.length}" />` : `<div class="analystPhotoPlaceholder" aria-label="Фотография события отсутствует"><span>строит.рф</span><small>Рабочее событие</small></div>`}<span class="photoLockOverlay" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10V7a5 5 0 0 1 10 0v3"/><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M12 14v3"/></svg></span></article>`,
         )
         .join('');
       const dots =
@@ -116,10 +116,8 @@
             200,
           );
           if (
-            await this.assignImage(
-              image,
-              previewUrl,
-              () => this.retainImage(image, this.previewCache, artifactId),
+            await this.assignImage(image, previewUrl, () =>
+              this.retainImage(image, this.previewCache, artifactId),
             )
           ) {
             this.sizeSlide(image);
@@ -138,10 +136,8 @@
             40,
           );
           if (
-            await this.assignImage(
-              image,
-              originalUrl,
-              () => this.retainImage(image, this.originalCache, artifactId),
+            await this.assignImage(image, originalUrl, () =>
+              this.retainImage(image, this.originalCache, artifactId),
             )
           ) {
             this.sizeSlide(image);

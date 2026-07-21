@@ -61,7 +61,7 @@ test('step cards add, focus, confirm destructive removal and renumber safely', (
   assert.match(app, /scrollIntoView\(\{ behavior: 'smooth', block: 'center' \}\)/);
   assert.match(app, /type: 'deleteStep'/);
   assert.match(app, /Введённые данные этого этапа будут удалены/);
-  assert.match(app, /removeButton\.hidden = cards\.length === 1 \|\| isCompleted/);
+  assert.match(app, /removeButton\.hidden = isCompleted/);
   assert.match(app, /removeButton\.setAttribute\('aria-label', `Удалить этап \$\{order\}`\)/);
   assert.match(css, /\.managerStepFields::before[\s\S]*?background:\s*linear-gradient/);
 });
@@ -81,11 +81,11 @@ test('priority and access use only the approved native radio semantics', () => {
   assert.match(css, /\.managerSegmentOption input:focus-visible \+ span/);
 });
 
-test('worker stays API-driven and the selected id remains the payload assignee', () => {
+test('worker stays API-driven and the selected id or shared mode remains the payload assignee', () => {
   assert.match(app, /apiFetch\('\/api\/v1\/manager\/workers'\)/);
-  assert.match(app, /elements\.managerWorker\.innerHTML = workers\.length/);
+  assert.match(app, /'<option value="">Без ответственного<\/option>'/);
   assert.match(app, /escapeHtml\(item\.name \|\| item\.email\)/);
-  assert.match(app, /assigneeId: elements\.managerWorker\.value/);
+  assert.match(app, /assigneeId: elements\.managerWorker\.value \|\| null/);
   assert.match(css, /\.managerAssignmentRow[\s\S]*?grid-template-columns/);
   assert.doesNotMatch(modal, /ilya|Илья Н\./);
 });

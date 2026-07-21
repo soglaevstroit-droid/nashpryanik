@@ -15,9 +15,9 @@ import { EventService } from '../events/event.service.js';
 export interface ManagerTaskInput {
   operationId: string;
   objectId: string;
-  assigneeId: string;
+  assigneeId: string | null;
   title: string;
-  description?: string;
+  description: string;
   location: string;
   priority?: TaskPriority;
   accessStatus?: TaskAccessStatus;
@@ -30,7 +30,7 @@ export interface ManagerTaskEditInput {
   operationId: string;
   updatedAt: string;
   objectId: string;
-  assigneeId: string;
+  assigneeId: string | null;
   title: string;
   description?: string;
   location: string;
@@ -158,15 +158,19 @@ export class ManagerTaskService {
     if (existing) return this.getTask(existing.id);
 
     const [worker, object, activeTask] = await Promise.all([
-      this.database.user.findFirst({
-        where: { id: input.assigneeId, role: 'WORKER', isActive: true },
-      }),
+      input.assigneeId
+        ? this.database.user.findFirst({
+            where: { id: input.assigneeId, role: 'WORKER', isActive: true },
+          })
+        : null,
       this.database.constructionObject.findFirst({ where: { id: input.objectId, isActive: true } }),
-      this.database.task.findFirst({
-        where: { assigneeId: input.assigneeId, status: 'IN_PROGRESS', deletedAt: null },
-      }),
+      input.assigneeId
+        ? this.database.task.findFirst({
+            where: { assigneeId: input.assigneeId, status: 'IN_PROGRESS', deletedAt: null },
+          })
+        : null,
     ]);
-    if (!worker) throw new BadRequestException('Исполнитель недоступен');
+    if (input.assigneeId && !worker) throw new BadRequestException('Исполнитель недоступен');
     if (!object) throw new BadRequestException('Объект недоступен');
     if (input.priority === 'URGENT' && activeTask && !input.forceUrgent) {
       throw new ConflictException({
@@ -213,7 +217,7 @@ export class ManagerTaskService {
             accessStatus: input.accessStatus ?? 'OPEN',
             position,
             creatorId: user.id,
-            assigneeId: worker.id,
+            assigneeId: worker?.id ?? null,
             processId: process.id,
             objectId: object.id,
             creationOperationId: input.operationId,
@@ -238,7 +242,7 @@ export class ManagerTaskService {
             idempotencyKey: `manager:create:${input.operationId}`,
             payload: {
               action: 'TASK_CREATED',
-              assigneeId: worker.id,
+              assigneeId: worker?.id ?? null,
               position,
               priority: input.priority ?? 'NORMAL',
               accessStatus: input.accessStatus ?? 'OPEN',
@@ -248,6 +252,7 @@ export class ManagerTaskService {
               location: input.location.trim(),
               stepsCount: input.steps.length,
               photosCount: uploads.length,
+              shared: !worker,
             },
           },
           client,
@@ -298,20 +303,24 @@ export class ManagerTaskService {
         if (['ACCEPTED', 'IN_PROGRESS', 'PAUSED'].includes(task.status) && !input.reason?.trim())
           throw new BadRequestException('Причина изменений обязательна');
 
-        const worker = await client.user.findFirst({
-          where: { id: input.assigneeId, role: 'WORKER', isActive: true },
-          select: { id: true, name: true, email: true },
-        });
+        const worker = input.assigneeId
+          ? await client.user.findFirst({
+              where: { id: input.assigneeId, role: 'WORKER', isActive: true },
+              select: { id: true, name: true, email: true },
+            })
+          : null;
         const object = await client.constructionObject.findFirst({
           where: { id: input.objectId, isActive: true },
           select: { id: true, name: true },
         });
-        if (!worker) throw new BadRequestException('Исполнитель недоступен');
+        if (input.assigneeId && !worker) throw new BadRequestException('Исполнитель недоступен');
         if (!object) throw new BadRequestException('Объект недоступен');
         if (task.status === 'IN_PROGRESS' && input.assigneeId !== task.assigneeId)
           throw new BadRequestException(
             'Задача уже находится в работе. Передача другому сотруднику будет реализована отдельно.',
           );
+        if (task.status === 'PAUSED' && !input.assigneeId)
+          throw new BadRequestException('Задача на паузе должна сохранять ответственного');
         if (
           ['ACCEPTED', 'IN_PROGRESS', 'PAUSED'].includes(task.status) &&
           input.objectId !== task.objectId
@@ -579,8 +588,9 @@ export class ManagerTaskService {
             metadata: {
               taskTitle: input.title.trim(),
               objectName: object.name,
-              assigneeId: worker.id,
-              assigneeName: worker.name ?? worker.email,
+              assigneeId: worker?.id ?? null,
+              shared: !worker,
+              assigneeName: worker ? (worker.name ?? worker.email) : null,
               actorName: actor?.name ?? actor?.email,
               reason: clean(input.reason),
               summary,
@@ -852,18 +862,18 @@ function managerHistoryCursorWhere(value: string): Prisma.EventWhereInput {
 
 function assertInput(input: ManagerTaskInput) {
   if (!input.operationId) throw new BadRequestException('operationId is required');
-  if (!input.objectId || !input.assigneeId)
-    throw new BadRequestException('Object and worker are required');
+  if (!input.objectId) throw new BadRequestException('Object is required');
+  if (input.assigneeId !== null && typeof input.assigneeId !== 'string')
+    throw new BadRequestException('Worker must be selected or explicitly omitted');
   if (input.title?.trim().length < 3 || input.title.trim().length > 160)
     throw new BadRequestException('Название должно содержать от 3 до 160 символов');
+  if (!input.description?.trim()) throw new BadRequestException('Описание обязательно');
   if (!input.location?.trim()) throw new BadRequestException('Место обязательно');
   if (!Number.isInteger(input.position) || input.position < 1)
     throw new BadRequestException('Номер задачи должен быть положительным целым числом');
-  if (
-    !input.steps?.length ||
-    input.steps.some((step) => !step.title?.trim() || !step.description?.trim())
-  )
-    throw new BadRequestException('Добавьте минимум один полностью заполненный этап');
+  if (!Array.isArray(input.steps)) throw new BadRequestException('Этапы должны быть массивом');
+  if (input.steps.some((step) => !step.title?.trim() || !step.description?.trim()))
+    throw new BadRequestException('Заполните название и описание каждого добавленного этапа');
   if (input.priority && !['NORMAL', 'URGENT'].includes(input.priority))
     throw new BadRequestException('Unsupported priority');
   if (input.accessStatus && !['OPEN', 'CLOSED'].includes(input.accessStatus))
@@ -874,18 +884,18 @@ function assertEditInput(input: ManagerTaskEditInput) {
   if (!input?.operationId?.trim()) throw new BadRequestException('operationId is required');
   const version = new Date(input.updatedAt);
   if (Number.isNaN(version.getTime())) throw new BadRequestException('updatedAt is required');
-  if (!input.objectId || !input.assigneeId)
-    throw new BadRequestException('Object and worker are required');
+  if (!input.objectId) throw new BadRequestException('Object is required');
+  if (input.assigneeId !== null && typeof input.assigneeId !== 'string')
+    throw new BadRequestException('Worker must be selected or explicitly omitted');
   if (input.title?.trim().length < 3 || input.title.trim().length > 160)
     throw new BadRequestException('Название должно содержать от 3 до 160 символов');
+  if (!input.description?.trim()) throw new BadRequestException('Описание обязательно');
   if (!input.location?.trim()) throw new BadRequestException('Место обязательно');
   if (!Number.isInteger(input.position) || input.position < 1)
     throw new BadRequestException('Номер задачи должен быть положительным целым числом');
-  if (
-    !input.steps?.length ||
-    input.steps.some((step) => !step.title?.trim() || !step.description?.trim())
-  )
-    throw new BadRequestException('Добавьте минимум один полностью заполненный этап');
+  if (!Array.isArray(input.steps)) throw new BadRequestException('Этапы должны быть массивом');
+  if (input.steps.some((step) => !step.title?.trim() || !step.description?.trim()))
+    throw new BadRequestException('Заполните название и описание каждого добавленного этапа');
   if (!['NORMAL', 'URGENT'].includes(input.priority))
     throw new BadRequestException('Unsupported priority');
   if (!['OPEN', 'CLOSED'].includes(input.accessStatus))

@@ -308,16 +308,41 @@ export class ArtifactService {
     if (artifact.taskId && this.database) {
       const task = await this.database.task.findUnique({
         where: { id: artifact.taskId },
-        select: { assigneeId: true },
+        select: {
+          assigneeId: true,
+          status: true,
+          accessStatus: true,
+          deletedAt: true,
+        },
       });
       if (task?.assigneeId === user.id) return;
+      if (
+        task &&
+        !task.assigneeId &&
+        task.status === 'ASSIGNED' &&
+        task.accessStatus === 'OPEN' &&
+        !task.deletedAt
+      )
+        return;
     }
     throw new NotFoundException('Photo not found');
   }
 
   private async assertUploadContext(user: AuthUser, dto: UploadPhotoDto): Promise<void> {
     if (user.role !== 'WORKER' || !this.database) return;
-    if (!dto.taskStepId) throw new BadRequestException('Task step is required for worker photo');
+    if (!dto.taskStepId) {
+      if (!dto.taskId) throw new BadRequestException('Task is required for worker photo');
+      const task = await this.database.task.findFirst({
+        where: { id: dto.taskId, assigneeId: user.id, deletedAt: null },
+        include: { steps: { where: { deletedAt: null }, select: { id: true } } },
+      });
+      if (!task) throw new NotFoundException('Task not found');
+      if (task.steps.length > 0)
+        throw new BadRequestException('Task step is required for a task with steps');
+      if (task.status !== 'IN_PROGRESS' || task.accessStatus !== 'OPEN' || task.isWorkBlocked)
+        throw new BadRequestException('Photos can be added only to an active task');
+      return;
+    }
     const step = await this.database.taskStep.findUnique({
       where: { id: dto.taskStepId },
       include: {

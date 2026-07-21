@@ -23,6 +23,7 @@
     "backend:test": "npm run test -w @stroit/backend",
     "backend:db:check": "npm run db:check -w @stroit/backend",
     "backend:bootstrap-demo-worker": "npm run bootstrap:demo-worker -w @stroit/backend",
+    "tasks:local:clean": "npm run tasks:local:clean -w @stroit/backend --",
     "testdata:extended": "npm run testdata:extended -w @stroit/backend",
     "testdata:extended:clean": "npm run testdata:extended:clean -w @stroit/backend",
     "testdata:clone-ilya-to-work": "npm run testdata:clone-ilya-to-work -w @stroit/backend",

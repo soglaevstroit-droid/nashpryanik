@@ -6,7 +6,10 @@ const app = await readFile(new URL('./public/app.js', import.meta.url), 'utf8');
 const html = await readFile(new URL('./public/index.html', import.meta.url), 'utf8');
 const styles = await readFile(new URL('./public/styles.css', import.meta.url), 'utf8');
 const slider = await readFile(new URL('./public/photo-slider.js', import.meta.url), 'utf8');
-const placeholder = await readFile(new URL('./public/photo-placeholder.js', import.meta.url), 'utf8');
+const placeholder = await readFile(
+  new URL('./public/photo-placeholder.js', import.meta.url),
+  'utf8',
+);
 const seed = await readFile(
   new URL('../backend/src/database/bootstrap-demo-worker.ts', import.meta.url),
   'utf8',
@@ -26,11 +29,12 @@ test('task detail is rendered from the selected task and its own ordered steps',
   assert.equal((html.match(/id="stepsList"/g) ?? []).length, 1);
 });
 
-test('details support status actions and return to the task list', () => {
+test('details support status actions and conditionally return to the task list', () => {
   assert.match(app, /data-detail-step-action/);
   assert.match(app, /data-detail-task-action/);
   assert.match(html, /id="taskDetailView"[\s\S]*?data-back-to-tasks/);
   assert.match(app, /taskListScrollY/);
+  assert.match(app, /requestActiveTaskExit/);
 });
 
 test('photo gallery keeps swipe behavior and dots without a numeric counter', () => {
@@ -87,7 +91,10 @@ test('photo placeholder is a presentation-only layer with branded building block
   assert.match(styles, /animation:\s*photo-loading-block 540ms/);
   assert.match(styles, /animation-delay:\s*150ms/);
   assert.match(styles, /background:\s*var\(--accent\)/);
-  assert.match(styles, /\.photoSlide\.is-photo-loaded \.photoLoadingPlaceholder[\s\S]*?opacity:\s*0/);
+  assert.match(
+    styles,
+    /\.photoSlide\.is-photo-loaded \.photoLoadingPlaceholder[\s\S]*?opacity:\s*0/,
+  );
   assert.match(styles, /\.photoSlide\.is-broken \.photoLoadingPlaceholder[\s\S]*?display:\s*none/);
 });
 
@@ -99,7 +106,7 @@ test('task title uses a balanced header zone and responsive 19–20px type', () 
   assert.match(styles, /-webkit-line-clamp:\s*2/);
 });
 
-test('task feed is flat and each card contains only title, slider, location and progress', () => {
+test('task feed stays flat and preserves the card content order', () => {
   assert.match(app, /flatMap\(\(group\) =>/);
   assert.match(app, /function renderTaskCard/);
   assert.match(app, /taskLocation/);
@@ -108,6 +115,7 @@ test('task feed is flat and each card contains only title, slider, location and 
     app.match(/function renderTaskCard[\s\S]*?\n}/)?.[0] ?? '',
     /Исполнитель|taskSummary/,
   );
+  assert.match(app, /renderTaskAssignee\(task\)/);
   assert.match(styles, /\.taskCard::before[\s\S]*?width:\s*4px/);
 });
 
@@ -119,10 +127,10 @@ test('photo slides have one height and preserve intrinsic proportions', () => {
   assert.match(slider, /carousel\.clientWidth \* 0\.88/);
 });
 
-test('demo seed provisions reusable pairs for tasks, steps and events', () => {
-  assert.match(seed, /assetFiles\.slice\(0, 2\)/);
-  assert.match(seed, /assetFiles\.slice\(2, 4\)/);
-  assert.match(seed, /if \(event\.artifacts\.length >= 2\) continue/);
+test('local bootstrap cannot recreate tasks, steps, events or photos', () => {
+  assert.match(seed, /ensureUser/);
+  assert.doesNotMatch(seed, /database\.(task|taskStep|event|artifact)\./);
+  assert.doesNotMatch(seed, /ArtifactStorageService/);
 });
 
 test('one photo and empty photo lists use valid states', () => {

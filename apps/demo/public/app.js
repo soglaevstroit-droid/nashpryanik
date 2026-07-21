@@ -1,4 +1,4 @@
-/* global CameraUtils, Headers, HTMLElement, File, PhotoSlider, URL, crypto, navigator, sessionStorage */
+/* global AnalystTimeline, CameraUtils, Headers, HTMLElement, File, PhotoSlider, URL, crypto, navigator, sessionStorage */
 
 const authTokenStorageKey = 'stroit.demo.accessToken';
 const legacyShiftStorageKey = 'stroit.demo.shiftOpen';
@@ -51,8 +51,20 @@ let lastTaskLockedMessageAt = 0;
 let coinTicker = null;
 let historyCursor = null;
 let managerHistoryWorker = null;
+let analystPollingTimer = null;
+let analystLiveRequest = null;
+let analystRequestGeneration = 0;
+let analystLiveSignature = '';
+const analystFrameIndexStore = AnalystTimeline.createIndexStore();
 let selectedTaskId = null;
 let selectedTask = null;
+let activeWorkerTaskId = null;
+let pendingTaskPause = null;
+let pendingTaskResume = null;
+let activeTaskHistoryArmed = false;
+let workerNavigationRevision = 0;
+let workerObjectsRequestId = 0;
+let managerTasksRequestId = 0;
 let taskListScrollY = 0;
 let taskDetailActionPending = false;
 let pendingCameraMode = null;
@@ -85,6 +97,10 @@ let cameraAttempt = {
   isSubmitting: false,
   facingMode: 'environment',
   cameraCount: 0,
+  filePickerFallback: false,
+  fileName: null,
+  mimeType: 'image/jpeg',
+  taskId: null,
   taskStepId: null,
 };
 
@@ -194,6 +210,7 @@ const elements = {
   shiftCameraText: document.querySelector('#shiftCameraText'),
   shiftCameraVideo: document.querySelector('#shiftCameraVideo'),
   shiftCameraCanvas: document.querySelector('#shiftCameraCanvas'),
+  shiftCameraFileInput: document.querySelector('#shiftCameraFileInput'),
   shiftCameraPreview: document.querySelector('#shiftCameraPreview'),
   shiftCameraState: document.querySelector('#shiftCameraState'),
   shiftCameraError: document.querySelector('#shiftCameraError'),
@@ -221,16 +238,20 @@ const elements = {
     document.querySelector('#stepTestRow'),
   ],
   workerObjectsList: document.querySelector('#workerObjectsList'),
+  analystWorkersList: document.querySelector('#analystWorkersList'),
   historyList: document.querySelector('#historyList'),
   historyHeading: document.querySelector('#historyHeading'),
   historyMoreButton: document.querySelector('#historyMoreButton'),
   taskDescription: document.querySelector('#taskDescription'),
+  taskDescriptionCard: document.querySelector('#taskDescriptionCard'),
+  simpleTaskActions: document.querySelector('#simpleTaskActions'),
   taskAssignee: document.querySelector('#taskAssignee'),
   taskPhotos: document.querySelector('#taskPhotos'),
   taskPauseInfo: document.querySelector('#taskPauseInfo'),
   workerMessagesList: document.querySelector('#workerMessagesList'),
   workerArchiveList: document.querySelector('#workerArchiveList'),
   taskListHeading: document.querySelector('#taskListHeading'),
+  tasksNavLabel: document.querySelector('#tasksNavLabel'),
   orderNavButton: document.querySelector('#orderNavButton'),
   orderNavLabel: document.querySelector('#orderNavLabel'),
   historyNavButton: document.querySelector('#historyNavButton'),
@@ -258,6 +279,8 @@ const elements = {
   taskDetailProgressLine: document.querySelector('#taskDetailProgressLine'),
   taskDetailProgressPercent: document.querySelector('#taskDetailProgressPercent'),
   taskDetailProgressCount: document.querySelector('#taskDetailProgressCount'),
+  taskDetailProgress: document.querySelector('#taskDetailProgress'),
+  stepTimelineCard: document.querySelector('#stepTimelineCard'),
 };
 
 const photoSlider = new PhotoSlider({
@@ -281,6 +304,7 @@ const photoSlider = new PhotoSlider({
 
 const views = {
   myWork: document.querySelector('#myWorkView'),
+  analystLive: document.querySelector('#analystLiveView'),
   taskChoice: document.querySelector('#taskChoiceView'),
   taskDetail: document.querySelector('#taskDetailView'),
   currentStep: document.querySelector('#currentStepView'),
@@ -313,6 +337,7 @@ elements.loginForm.addEventListener('submit', async (event) => {
 elements.historyMoreButton.addEventListener('click', () => loadHistory(false));
 elements.managerTaskForm.addEventListener('submit', submitManagerTask);
 elements.managerPhotos.addEventListener('change', handleManagerPhotoSelection);
+elements.shiftCameraFileInput.addEventListener('change', handleCameraFileSelection);
 elements.managerTaskForm.addEventListener('input', clearManagerFormError);
 elements.managerTaskForm.addEventListener('keydown', (event) => {
   if (
@@ -358,6 +383,8 @@ document.addEventListener('click', async (event) => {
   const detailStepAction = event.target.closest('[data-detail-step-action]');
   const uploadPhotoButton = event.target.closest('[data-upload-detail-photo]');
   const reloadTaskDetailButton = event.target.closest('[data-reload-task-detail]');
+  const simpleTaskPhotoButton = event.target.closest('[data-simple-task-photo]');
+  const simpleTaskCompleteButton = event.target.closest('[data-simple-task-complete]');
   const addManagerStepButton = event.target.closest('[data-add-manager-step]');
   const removeManagerStepButton = event.target.closest('[data-remove-manager-step]');
   const removeManagerPhotoButton = event.target.closest('[data-remove-manager-photo]');
@@ -376,6 +403,9 @@ document.addEventListener('click', async (event) => {
   const confirmCompleteTaskButton = event.target.closest('[data-confirm-complete-task]');
   const cancelCompleteTaskButton = event.target.closest('[data-cancel-complete-task]');
   const finishCompleteTaskButton = event.target.closest('[data-finish-complete-task]');
+  const analystRetryButton = event.target.closest('[data-analyst-retry]');
+  const analystShiftButton = event.target.closest('[data-analyst-shift-id]');
+  const analystHistoryBackButton = event.target.closest('[data-analyst-history-back]');
   if (sectionButton) {
     navigateSection(sectionButton.dataset.section);
     return;
@@ -384,6 +414,9 @@ document.addEventListener('click', async (event) => {
     navigateSection(previousWorkingSection || 'tasks');
     return;
   }
+  if (analystRetryButton) return loadAnalystWorkers({ initial: true });
+  if (analystShiftButton) return loadAnalystShift(analystShiftButton.dataset.analystShiftId);
+  if (analystHistoryBackButton) return loadAnalystHistory();
   if (addManagerStepButton) return addManagerStep({ focus: true });
   if (removeManagerStepButton)
     return removeManagerStep(removeManagerStepButton.closest('.managerStepFields'));
@@ -455,7 +488,21 @@ document.addEventListener('click', async (event) => {
     return;
   }
 
+  if (simpleTaskPhotoButton) {
+    openSimpleTaskCamera(false);
+    return;
+  }
+
+  if (simpleTaskCompleteButton) {
+    openSimpleTaskCamera(true);
+    return;
+  }
+
   if (backToTasksButton) {
+    if (hasActiveWorkerTask()) {
+      await requestActiveTaskExit();
+      return;
+    }
     openView('myWork', { preserveScroll: true });
     window.scrollTo({ top: taskListScrollY, behavior: 'instant' });
     return;
@@ -513,6 +560,8 @@ document.addEventListener('click', async (event) => {
   }
 
   if (cancelTaskStatusButton) {
+    pendingTaskPause = null;
+    pendingTaskResume = null;
     closeModal();
   }
 
@@ -550,6 +599,16 @@ document.addEventListener('click', async (event) => {
 
   if (confirmTaskStatusButton) {
     if (confirmTaskStatusButton.disabled) {
+      return;
+    }
+
+    if (pendingTaskPause) {
+      await confirmSelectedTaskPause();
+      return;
+    }
+
+    if (pendingTaskResume) {
+      await confirmWorkerTaskResume();
       return;
     }
 
@@ -616,6 +675,17 @@ elements.helpRequestInput.addEventListener('input', () => {
 });
 
 window.addEventListener('beforeunload', stopCameraStream);
+window.addEventListener('popstate', () => {
+  if (!hasActiveWorkerTask()) return;
+  armActiveTaskHistory();
+  void requestActiveTaskExit();
+});
+window.addEventListener('pageshow', (event) => {
+  if (accessToken && (event.persisted || isAnalyst())) void refreshCurrentWorkspace();
+});
+window.addEventListener('focus', () => {
+  if (accessToken && isAnalyst()) void refreshCurrentWorkspace();
+});
 
 clearLegacyShiftStorage();
 
@@ -685,6 +755,7 @@ async function showWorkspace() {
   }
 
   if (isManager()) {
+    stopAnalystPolling();
     configureBottomNavigation();
     elements.userInfo.textContent = currentUser.name ?? 'Руководитель';
     elements.loginScreen.hidden = true;
@@ -696,7 +767,23 @@ async function showWorkspace() {
     return true;
   }
 
+  if (isAnalyst()) {
+    configureBottomNavigation();
+    elements.userInfo.textContent = currentUser.name ?? 'Аналитик';
+    elements.loginScreen.hidden = true;
+    elements.loginScreen.classList.remove('is-active');
+    elements.workspaceScreen.hidden = false;
+    currentSection = 'tasks';
+    previousWorkingSection = 'tasks';
+    openView('analystLive');
+    updateBottomNavigation();
+    await loadAnalystWorkers({ initial: true });
+    startAnalystPolling();
+    return true;
+  }
+
   if (!isWorker()) {
+    stopAnalystPolling();
     configureBottomNavigation();
     elements.userInfo.textContent = currentUser?.name ?? currentUser?.role ?? 'Пользователь';
     elements.loginScreen.hidden = true;
@@ -722,7 +809,8 @@ async function showWorkspace() {
   elements.workspaceScreen.hidden = false;
   renderTask();
   await loadWorkerObjects();
-  navigateSection('tasks');
+  if (hasActiveWorkerTask()) await ensureActiveWorkerTaskOpen();
+  else navigateSection('tasks');
   return true;
 }
 
@@ -734,6 +822,11 @@ function openView(name, options = {}) {
     'resultConfirmation',
     'workSent',
   ];
+
+  if (hasActiveWorkerTask() && !taskFlowViews.includes(name)) {
+    name = 'taskDetail';
+    if (selectedTaskId !== activeWorkerTaskId) void ensureActiveWorkerTaskOpen();
+  }
 
   if (name === 'currentStep') {
     renderCurrentStep();
@@ -756,6 +849,27 @@ function openView(name, options = {}) {
 }
 
 function navigateSection(section) {
+  if (hasActiveWorkerTask()) {
+    void ensureActiveWorkerTaskOpen();
+    return;
+  }
+  if (isAnalyst()) {
+    if (section === 'tasks') {
+      currentSection = 'tasks';
+      previousWorkingSection = 'tasks';
+      openView('analystLive', { preserveScroll: true });
+      void loadAnalystWorkers();
+    } else if (section === 'history') {
+      currentSection = 'history';
+      previousWorkingSection = 'history';
+      openView('history');
+    } else {
+      currentSection = section;
+      openView('maintenance');
+    }
+    updateBottomNavigation();
+    return;
+  }
   if (!isManager() && !isWorker()) {
     currentSection = section;
     openView('maintenance');
@@ -800,9 +914,121 @@ function isWorker() {
   return currentUser?.role === 'WORKER';
 }
 
+function isAnalyst() {
+  return currentUser?.role === 'ANALYST';
+}
+
+function hasActiveWorkerTask() {
+  return isWorker() && isShiftOpen() && Boolean(activeWorkerTaskId);
+}
+
+async function ensureActiveWorkerTaskOpen() {
+  if (!hasActiveWorkerTask()) return false;
+  if (
+    selectedTaskId === activeWorkerTaskId &&
+    selectedTask?.status === 'IN_PROGRESS' &&
+    views.taskDetail.classList.contains('is-active')
+  ) {
+    armActiveTaskHistory();
+    return true;
+  }
+  await openTaskDetails(activeWorkerTaskId, { preserveListScroll: true });
+  return true;
+}
+
+function findConfirmedActiveWorkerTask(tasks) {
+  const activeTasks = tasks.filter(
+    (task) => task?.status === 'IN_PROGRESS' && task.accessStatus === 'OPEN' && !task.deletedAt,
+  );
+  return activeTasks.length === 1 ? activeTasks[0] : null;
+}
+
+function setActiveWorkerTask(taskId) {
+  const nextTaskId = taskId || null;
+  if (activeWorkerTaskId === nextTaskId) {
+    if (!nextTaskId) releaseActiveTaskHistory();
+    return;
+  }
+  releaseActiveTaskHistory();
+  activeWorkerTaskId = nextTaskId;
+  workerNavigationRevision += 1;
+}
+
+function clearSelectedWorkerTask() {
+  photoSlider.clear(views.taskDetail);
+  selectedTask = null;
+  selectedTaskId = null;
+}
+
+function clearActiveWorkerTaskState({ clearSelection = false } = {}) {
+  workerObjectsRequestId += 1;
+  setActiveWorkerTask(null);
+  pendingTaskPause = null;
+  pendingTaskResume = null;
+  if (clearSelection) clearSelectedWorkerTask();
+}
+
+function armActiveTaskHistory() {
+  if (!hasActiveWorkerTask()) return;
+  const state =
+    window.history.state && typeof window.history.state === 'object'
+      ? { ...window.history.state }
+      : {};
+  if (activeTaskHistoryArmed && state.activeWorkerTaskId === activeWorkerTaskId) return;
+  if (!activeTaskHistoryArmed && state.activeWorkerTaskId === activeWorkerTaskId) {
+    delete state.activeWorkerTaskId;
+    window.history.replaceState(state, '', window.location.href);
+  }
+  window.history.pushState({ ...state, activeWorkerTaskId }, '', window.location.href);
+  activeTaskHistoryArmed = true;
+}
+
+function releaseActiveTaskHistory() {
+  const state =
+    window.history.state && typeof window.history.state === 'object'
+      ? { ...window.history.state }
+      : {};
+  if ('activeWorkerTaskId' in state) {
+    delete state.activeWorkerTaskId;
+    window.history.replaceState(state, '', window.location.href);
+  }
+  activeTaskHistoryArmed = false;
+}
+
+async function restoreWorkerWorkspace() {
+  if (!isWorker()) return true;
+  if (!(await refreshShiftState())) return false;
+  if (!(await loadWorkerObjects())) return false;
+  if (hasActiveWorkerTask()) await ensureActiveWorkerTaskOpen();
+  else {
+    clearSelectedWorkerTask();
+    currentSection = 'tasks';
+    previousWorkingSection = 'tasks';
+    openView('myWork', { preserveScroll: true });
+    updateBottomNavigation();
+  }
+  return true;
+}
+
+async function refreshCurrentWorkspace() {
+  if (isWorker()) return restoreWorkerWorkspace();
+  if (isAnalyst()) {
+    if (currentSection === 'history') return loadAnalystHistory();
+    return loadAnalystWorkers();
+  }
+  if (!isManager()) return true;
+  const loaded = await loadManagerTasks();
+  if (selectedTaskId && views.taskDetail.classList.contains('is-active')) await reloadTaskDetails();
+  if (currentSection === 'messages') await loadManagerMessages();
+  return loaded;
+}
+
 function configureBottomNavigation() {
   const manager = isManager();
-  const expectedSections = ['tasks', 'messages', 'order', 'history', 'profile'];
+  const analyst = isAnalyst();
+  const expectedSections = analyst
+    ? ['tasks', 'history', 'profile']
+    : ['tasks', 'messages', 'order', 'history', 'profile'];
   const buttons = Array.from(document.querySelectorAll('.bottomNav [data-section]'));
 
   for (const [index, button] of buttons.entries()) {
@@ -812,13 +1038,15 @@ function configureBottomNavigation() {
     if (button.dataset.section === 'history') {
       button.setAttribute(
         'aria-label',
-        manager ? 'Открыть историю сотрудников' : 'История — технические работы',
+        manager || analyst ? 'Открыть историю сотрудников' : 'История — технические работы',
       );
     }
     if (index >= expectedSections.length) button.hidden = true;
   }
 
   elements.workspaceScreen.classList.toggle('manager-mode', manager);
+  elements.workspaceScreen.classList.toggle('analyst-mode', analyst);
+  elements.tasksNavLabel.textContent = analyst ? 'Сотрудники' : 'Задачи';
   elements.orderNavLabel.textContent = manager ? 'Поставить' : 'Заказать';
   elements.orderNavButton.setAttribute('aria-label', manager ? 'Поставить задачу' : 'Заказать');
   elements.historyNavButton.hidden = false;
@@ -924,7 +1152,7 @@ function applyTaskAccessState() {
   }
   if (locked) {
     photoSlider.close();
-    if (elements.workspaceScreen.classList.contains('is-task-flow')) {
+    if (elements.workspaceScreen.classList.contains('is-task-flow') && !hasActiveWorkerTask()) {
       selectedTaskId = null;
       selectedTask = null;
       openView('myWork', { preserveScroll: true });
@@ -1006,8 +1234,25 @@ function renderOnlineCoins() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && accessToken) void refreshShiftState();
+  if (!document.hidden && accessToken) {
+    void refreshCurrentWorkspace();
+    if (isAnalyst()) startAnalystPolling();
+  } else if (isAnalyst()) stopAnalystPolling();
 });
+
+function startAnalystPolling() {
+  stopAnalystPolling();
+  if (!isAnalyst() || document.hidden) return;
+  analystPollingTimer = window.setTimeout(async () => {
+    await loadAnalystWorkers();
+    startAnalystPolling();
+  }, 20_000);
+}
+
+function stopAnalystPolling() {
+  if (analystPollingTimer !== null) window.clearTimeout(analystPollingTimer);
+  analystPollingTimer = null;
+}
 
 async function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers ?? {});
@@ -1025,12 +1270,17 @@ async function apiFetch(url, options = {}) {
 }
 
 async function loadWorkerObjects() {
+  const requestId = ++workerObjectsRequestId;
   elements.workerObjectsList.innerHTML = '<p>Загружаем задачи…</p>';
   try {
     const response = await apiFetch('/api/v1/worker/objects');
     const groups = await readResponseBody(response);
     if (!response.ok) throw new Error(getApiMessage(groups));
-    const total = groups.reduce((sum, group) => sum + group.tasks.length, 0);
+    if (requestId !== workerObjectsRequestId) return false;
+    const tasks = groups.flatMap((group) => group.tasks);
+    const activeTask = findConfirmedActiveWorkerTask(tasks);
+    setActiveWorkerTask(activeTask?.id ?? null);
+    const total = tasks.length;
     if (total === 0) {
       elements.workerObjectsList.innerHTML =
         '<div class="emptyObject"><p>У вас пока нет назначенных задач</p></div>';
@@ -1041,30 +1291,39 @@ async function loadWorkerObjects() {
       .join('');
     photoSlider.mount(elements.workerObjectsList);
     applyTaskAccessState();
+    return true;
   } catch {
+    if (requestId !== workerObjectsRequestId) return false;
     elements.workerObjectsList.innerHTML =
       '<div class="emptyObject"><p>Не удалось загрузить задачи. Повторить</p><button class="secondaryButton" type="button" data-reload-worker-tasks>Повторить</button></div>';
     elements.workerObjectsList
       .querySelector('[data-reload-worker-tasks]')
       ?.addEventListener('click', loadWorkerObjects);
+    return false;
   }
 }
 
 async function loadManagerTasks() {
+  const requestId = ++managerTasksRequestId;
   elements.workerObjectsList.innerHTML = '<p>Загружаем задачи…</p>';
-  const response = await apiFetch('/api/v1/manager/tasks');
-  const tasks = await readResponseBody(response);
-  if (!response.ok) {
+  try {
+    const response = await apiFetch('/api/v1/manager/tasks');
+    const tasks = await readResponseBody(response);
+    if (requestId !== managerTasksRequestId) return false;
+    if (!response.ok) throw new Error();
+    elements.workerObjectsList.innerHTML = tasks.length
+      ? tasks
+          .map((task) => renderTaskCard(task, task.object ?? { name: 'Объект не указан' }))
+          .join('')
+      : '<div class="emptyObject"><p>Активных задач пока нет</p></div>';
+    photoSlider.mount(elements.workerObjectsList);
+    return true;
+  } catch {
+    if (requestId !== managerTasksRequestId) return false;
     elements.workerObjectsList.innerHTML =
       '<div class="emptyObject"><p>Не удалось загрузить задачи</p></div>';
-    return;
+    return false;
   }
-  elements.workerObjectsList.innerHTML = tasks.length
-    ? tasks
-        .map((task) => renderTaskCard(task, task.object ?? { name: 'Объект не указан' }))
-        .join('')
-    : '<div class="emptyObject"><p>Активных задач пока нет</p></div>';
-  photoSlider.mount(elements.workerObjectsList);
 }
 
 async function openManagerTaskForm(task = null) {
@@ -1091,12 +1350,13 @@ async function openManagerTaskForm(task = null) {
   elements.managerObject.innerHTML = objects
     .map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`)
     .join('');
-  elements.managerWorker.innerHTML = workers.length
-    ? workers
-        .map((item) => `<option value="${item.id}">${escapeHtml(item.name || item.email)}</option>`)
-        .join('')
-    : '<option value="">Нет доступных исполнителей</option>';
-  managerWorkersAvailable = workers.length > 0;
+  elements.managerWorker.innerHTML = [
+    '<option value="">Без ответственного</option>',
+    ...workers.map(
+      (item) => `<option value="${item.id}">${escapeHtml(item.name || item.email)}</option>`,
+    ),
+  ].join('');
+  managerWorkersAvailable = true;
   clearManagerPhotoPreviews();
   elements.managerTaskForm.reset();
   elements.managerTaskForm.classList.remove('was-validated');
@@ -1149,7 +1409,7 @@ async function openManagerTaskForm(task = null) {
       elements.managerObject.disabled = true;
     if (task.status === 'IN_PROGRESS') elements.managerWorker.disabled = true;
     task.steps.forEach((step) => addManagerStep({ focus: false, step }));
-  } else addManagerStep({ focus: false });
+  }
   await renderManagerPhotoPreview();
   setManagerSubmitting(false);
   openModal('managerTask');
@@ -1191,8 +1451,6 @@ function addManagerStep({ focus = true, step = null } = {}) {
 }
 
 function removeManagerStep(step) {
-  if (elements.managerSteps.children.length === 1)
-    return showMessage('Минимум один этап обязателен');
   if (!step) return;
   const title = step.querySelector('[data-manager-step-title]')?.value.trim();
   const description = step.querySelector('[data-manager-step-description]')?.value.trim();
@@ -1229,7 +1487,7 @@ function renumberManagerSteps() {
     step.querySelector('.managerStepNumber').textContent = order;
     const removeButton = step.querySelector('[data-remove-manager-step]');
     const isCompleted = step.dataset.stepStatus === 'COMPLETED';
-    removeButton.hidden = cards.length === 1 || isCompleted;
+    removeButton.hidden = isCompleted;
     removeButton.setAttribute('aria-label', `Удалить этап ${order}`);
     const current = cards.find((candidate) => candidate.dataset.stepStatus === 'IN_PROGRESS');
     const moveable = managerFormMode === 'edit' && !isCompleted && step !== current;
@@ -1414,11 +1672,15 @@ async function submitManagerTask(event) {
   if (managerTaskSubmitting) return;
   clearManagerFormError();
   const titleInput = document.querySelector('#managerTitle');
+  const descriptionInput = document.querySelector('#managerDescription');
   const locationInput = document.querySelector('#managerLocation');
   const positionInput = document.querySelector('#managerPosition');
   locationInput.setCustomValidity(locationInput.value.trim() ? '' : 'Укажите место выполнения.');
   titleInput.setCustomValidity(
     titleInput.value.trim().length >= 3 ? '' : 'Введите минимум 3 символа.',
+  );
+  descriptionInput.setCustomValidity(
+    descriptionInput.value.trim() ? '' : 'Опишите, что нужно выполнить.',
   );
   const position = Number(positionInput.value);
   positionInput.setCustomValidity(
@@ -1446,9 +1708,9 @@ async function submitManagerTask(event) {
   const payload = {
     operationId: managerDraftOperationId ?? crypto.randomUUID(),
     objectId: elements.managerObject.value,
-    assigneeId: elements.managerWorker.value,
+    assigneeId: elements.managerWorker.value || null,
     title: titleInput.value.trim(),
-    description: document.querySelector('#managerDescription').value.trim(),
+    description: descriptionInput.value.trim(),
     location: document.querySelector('#managerLocation').value.trim(),
     priority: new FormData(elements.managerTaskForm).get('managerPriority'),
     accessStatus: new FormData(elements.managerTaskForm).get('managerAccess'),
@@ -1463,7 +1725,8 @@ async function submitManagerTask(event) {
       : {}),
   };
   const objectName = elements.managerObject.selectedOptions[0]?.textContent.trim() ?? '—';
-  const workerName = elements.managerWorker.selectedOptions[0]?.textContent.trim() ?? '—';
+  const workerName =
+    elements.managerWorker.selectedOptions[0]?.textContent.trim() ?? 'Без ответственного';
   const editChanges = managerFormMode === 'edit' ? buildManagerEditChanges(payload) : [];
   if (managerFormMode === 'edit' && !editChanges.length) {
     showMessage('Изменений нет.');
@@ -1585,7 +1848,7 @@ function buildManagerEditChanges(payload = null) {
   if (!managerEditingTask) return [];
   const current = payload ?? {
     objectId: elements.managerObject.value,
-    assigneeId: elements.managerWorker.value,
+    assigneeId: elements.managerWorker.value || null,
     title: document.querySelector('#managerTitle').value.trim(),
     description: document.querySelector('#managerDescription').value.trim(),
     location: document.querySelector('#managerLocation').value.trim(),
@@ -1764,6 +2027,8 @@ async function deleteManagerTask() {
 function renderTaskCard(task, object) {
   const completed = task.steps.filter((step) => step.status === 'COMPLETED').length;
   const percent = task.steps.length ? Math.round((completed / task.steps.length) * 100) : 0;
+  const assignee = renderTaskAssignee(task);
+  const assigneeClass = assignee ? ' has-task-assignee' : '';
   const gallery = PhotoSlider.render(task.photos, {
     id: `task-list-${task.id}`,
     emptyText: 'Фотографий пока нет',
@@ -1774,7 +2039,30 @@ function renderTaskCard(task, object) {
     task.priority === 'URGENT' && task.status !== 'IN_PROGRESS'
       ? 'is-paused'
       : taskCardStatusClass(task.status);
-  return `<article class="taskCard taskFeedCard ${statusClass}" data-worker-task-id="${task.id}" data-business-locked="${Boolean(task.isAccessLocked)}" role="button" tabindex="0"><div class="taskFeedCardHeader"><h3>${escapeHtml(task.title)}</h3></div>${gallery}<p class="taskLocation">${escapeHtml(location)}</p><div class="taskProgressBlock"><div class="taskProgressLine"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div><small>${completed} из ${task.steps.length} этапов выполнено</small></div></article>`;
+  const resumeAction =
+    !isManager() && task.status === 'PAUSED' && !task.isWorkBlocked
+      ? `<button class="secondaryButton taskResumeButton" type="button" data-worker-task-action="resume" data-task-id="${task.id}">Продолжить работу</button>`
+      : '';
+  const progress = task.steps.length
+    ? `<div class="taskProgressBlock"><div class="taskProgressLine"><span><i style="width:${percent}%"></i></span><b>${percent}%</b></div><small>${completed} из ${task.steps.length} этапов выполнено</small></div>`
+    : '';
+  return `<article class="taskCard taskFeedCard ${statusClass}${assigneeClass}${task.steps.length ? ' has-steps' : ' is-simple-task'}" data-worker-task-id="${task.id}" data-business-locked="${Boolean(task.isAccessLocked)}" role="button" tabindex="0"><div class="taskFeedCardHeader"><h3>${escapeHtml(task.title)}</h3></div>${assignee}${gallery}<p class="taskLocation">${escapeHtml(location)}</p>${progress}${resumeAction}</article>`;
+}
+
+function renderTaskAssignee(task) {
+  if (!isManager()) return '';
+  const name = taskAssigneeDisplayName(task.assignee);
+  const text = name ? `Ответственный: ${name}` : 'Ответственный не назначен';
+  const stateClass = name ? '' : ' is-unassigned';
+  return `<div class="taskAssigneeSlot"><p class="taskAssignee${stateClass}">${escapeHtml(text)}</p></div>`;
+}
+
+function taskAssigneeDisplayName(assignee) {
+  return (
+    [assignee?.name, assignee?.displayName, assignee?.login, assignee?.email]
+      .find((value) => typeof value === 'string' && value.trim())
+      ?.trim() ?? ''
+  );
 }
 
 function taskCardStatusClass(status) {
@@ -1784,7 +2072,7 @@ function taskCardStatusClass(status) {
       ACCEPTED: 'is-accepted',
       IN_PROGRESS: 'is-working',
       ON_REVIEW: 'is-review',
-      COMPLETED: 'is-accepted',
+      COMPLETED: 'is-completed',
       CANCELLED: 'is-paused',
       PAUSED: 'is-paused',
     }[status] ?? ''
@@ -1797,19 +2085,43 @@ function taskLocationLabel(task, object = task.object) {
 
 async function runWorkerTaskAction(action, taskId) {
   if (isTaskAccessLocked()) return notifyTaskLocked();
-  const endpoint = action === 'accept' ? 'accept' : 'start';
-  const response = await apiFetch(`/api/v1/tasks/${taskId}/${endpoint}`, { method: 'PATCH' });
-  const body = await readResponseBody(response);
-  if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось изменить задачу');
-  await loadWorkerObjects();
-  showMessage(action === 'accept' ? 'Задача принята' : 'Задача начата');
+  if (action === 'resume') {
+    requestWorkerTaskResume(taskId);
+    return;
+  }
+  if (taskDetailActionPending) return;
+  taskDetailActionPending = true;
+  try {
+    const response = await apiFetch(`/api/v1/tasks/${taskId}/accept`, { method: 'PATCH' });
+    const body = await readResponseBody(response);
+    if (!response.ok) {
+      await loadWorkerObjects();
+      if (response.status === 409) {
+        clearSelectedWorkerTask();
+        openView('myWork', { preserveScroll: true });
+      }
+      showMessage(getApiMessage(body) || 'Не удалось принять задачу');
+      return;
+    }
+    await Promise.all([loadWorkerObjects(), loadHistory(true)]);
+    if (activeWorkerTaskId) await ensureActiveWorkerTaskOpen();
+    showMessage('Задача принята и начата');
+  } catch {
+    showMessage('Не удалось принять задачу. Проверьте соединение.');
+  } finally {
+    taskDetailActionPending = false;
+    renderSelectedTaskActionState();
+  }
 }
 
-async function openTaskDetails(taskId) {
+async function openTaskDetails(taskId, options = {}) {
   if (!isManager() && isTaskAccessLocked()) return notifyTaskLocked();
+  if (!isManager() && activeWorkerTaskId && taskId !== activeWorkerTaskId) {
+    taskId = activeWorkerTaskId;
+  }
   selectedTaskId = taskId;
   selectedTask = null;
-  taskListScrollY = window.scrollY;
+  if (!options.preserveListScroll) taskListScrollY = window.scrollY;
   renderTaskDetailLoading();
   openView('taskDetail');
   await reloadTaskDetails();
@@ -1821,14 +2133,25 @@ async function reloadTaskDetails() {
     return notifyTaskLocked();
   }
   if (!selectedTaskId) return;
+  const requestedTaskId = selectedTaskId;
+  const navigationRevision = workerNavigationRevision;
   try {
     const response = await apiFetch(
       isManager()
-        ? `/api/v1/manager/tasks/${selectedTaskId}`
-        : `/api/v1/worker/tasks/${selectedTaskId}`,
+        ? `/api/v1/manager/tasks/${requestedTaskId}`
+        : `/api/v1/worker/tasks/${requestedTaskId}`,
     );
     const body = await readResponseBody(response);
+    if (
+      requestedTaskId !== selectedTaskId ||
+      (!isManager() && navigationRevision !== workerNavigationRevision)
+    )
+      return;
     if (!response.ok) {
+      if (!isManager() && [403, 404].includes(response.status)) {
+        await reconcileUnavailableWorkerTask(requestedTaskId, getApiMessage(body));
+        return;
+      }
       renderTaskDetailError(
         response.status === 404
           ? 'Задача не найдена или недоступна.'
@@ -1840,8 +2163,31 @@ async function reloadTaskDetails() {
     renderSelectedTask();
     await hydrateDetailPhotos();
   } catch {
+    if (
+      requestedTaskId !== selectedTaskId ||
+      (!isManager() && navigationRevision !== workerNavigationRevision)
+    )
+      return;
     renderTaskDetailError('Не удалось загрузить задачу. Проверьте соединение и повторите попытку.');
   }
+}
+
+async function reconcileUnavailableWorkerTask(taskId, message) {
+  const tasksLoaded = await loadWorkerObjects();
+  if (!tasksLoaded) {
+    if (selectedTaskId === taskId)
+      renderTaskDetailError(message || 'Не удалось проверить состояние задачи.');
+    return;
+  }
+  if (activeWorkerTaskId === taskId) {
+    renderTaskDetailError(message || 'Не удалось загрузить активную задачу.');
+    return;
+  }
+  clearSelectedWorkerTask();
+  currentSection = 'tasks';
+  previousWorkingSection = 'tasks';
+  openView('myWork', { preserveScroll: true });
+  updateBottomNavigation();
 }
 
 function renderTaskDetailLoading() {
@@ -1851,6 +2197,10 @@ function renderTaskDetailLoading() {
   elements.taskAssignee.textContent = '';
   elements.taskPhotos.innerHTML = '<p>Загружаем фотографии…</p>';
   elements.stepsList.innerHTML = '<p>Загружаем этапы…</p>';
+  elements.stepTimelineCard.hidden = false;
+  elements.taskDetailProgress.hidden = false;
+  elements.simpleTaskActions.hidden = true;
+  elements.simpleTaskActions.innerHTML = '';
   elements.taskDetailProgressLine.style.width = '0%';
   elements.taskDetailProgressPercent.textContent = '0%';
   elements.taskDetailProgressCount.textContent = 'Загружаем этапы…';
@@ -1864,10 +2214,14 @@ function renderTaskDetailError(message) {
   elements.taskPhotos.innerHTML = '<p>Фотографий нет</p>';
   elements.stepsList.innerHTML =
     '<button class="secondaryButton" type="button" data-reload-task-detail>Повторить</button>';
+  elements.stepTimelineCard.hidden = false;
+  elements.taskDetailProgress.hidden = true;
+  elements.simpleTaskActions.hidden = true;
 }
 
 function renderSelectedTask() {
   if (!selectedTask) return;
+  if (!isManager() && selectedTask.id === activeWorkerTaskId) armActiveTaskHistory();
   photoSlider.clear(views.taskDetail);
   elements.taskTitle.textContent = selectedTask.title;
   elements.taskObject.textContent = taskLocationLabel(selectedTask);
@@ -1882,14 +2236,15 @@ function renderSelectedTask() {
   elements.taskDetailProgressLine.style.width = `${progress}%`;
   elements.taskDetailProgressPercent.textContent = `${progress}%`;
   elements.taskDetailProgressCount.textContent = `${completedSteps} из ${selectedTask.steps.length} этапов выполнено`;
+  elements.taskDetailProgress.hidden = selectedTask.steps.length === 0;
+  elements.stepTimelineCard.hidden = selectedTask.steps.length === 0;
   renderSelectedTaskControl();
   elements.taskPhotos.innerHTML = PhotoSlider.render(selectedTask.photos, {
     id: `task-${selectedTask.id}`,
     emptyText: 'У задачи пока нет фотографий',
   });
-  elements.stepsList.innerHTML = selectedTask.steps.length
-    ? selectedTask.steps.map(renderTaskStep).join('')
-    : '<div class="emptyObject"><p>У задачи нет этапов</p></div>';
+  elements.stepsList.innerHTML = selectedTask.steps.map(renderTaskStep).join('');
+  renderSimpleTaskActions();
   renderStepWorkflowFooter();
   if (!isManager()) {
     elements.taskHelpIsland.hidden =
@@ -1911,22 +2266,52 @@ function renderSelectedTaskControl() {
       `Исполнитель: ${selectedTask.assignee?.name ?? 'не назначен'}`;
     return;
   }
-  const action =
-    selectedTask.status === 'ASSIGNED'
-      ? 'accept'
-      : selectedTask.status === 'ACCEPTED'
-        ? 'start'
-        : selectedTask.status === 'IN_PROGRESS'
-          ? 'pause'
-          : null;
+  const action = ['ASSIGNED', 'ACCEPTED'].includes(selectedTask.status)
+    ? 'accept'
+    : selectedTask.status === 'IN_PROGRESS'
+      ? 'pause'
+      : selectedTask.status === 'PAUSED' && !selectedTask.isWorkBlocked
+        ? 'resume'
+        : null;
   control.disabled = taskDetailActionPending || !action;
   control.dataset.detailTaskAction = action ?? '';
   control.querySelector('b').textContent = action
-    ? { accept: 'Принять задачу', start: 'Начать задачу', pause: 'Поставить на паузу' }[action]
+    ? {
+        accept: 'Принять задачу',
+        pause: 'Поставить на паузу',
+        resume: 'Продолжить работу',
+      }[action]
     : taskStatusLabel(selectedTask.status);
   control.querySelector('small').textContent = action
     ? 'Действие будет сохранено в истории.'
     : 'Для текущего статуса действий нет.';
+}
+
+function renderSelectedTaskActionState() {
+  if (!selectedTask) return;
+  renderSelectedTaskControl();
+  renderSimpleTaskActions();
+}
+
+function renderSimpleTaskActions() {
+  if (!selectedTask || selectedTask.steps.length > 0) {
+    elements.simpleTaskActions.hidden = true;
+    elements.simpleTaskActions.innerHTML = '';
+    return;
+  }
+  const pause = [...(selectedTask.messages ?? [])]
+    .reverse()
+    .find((message) => message.kind === 'PAUSE_REQUEST');
+  const pausePanel =
+    selectedTask.status === 'PAUSED' && pause
+      ? `<section class="stepStateMessage is-paused"><strong>Причина паузы</strong><p>${escapeHtml(pause.body)}</p><time>${formatLocalDateTime(pause.createdAt)}</time></section>`
+      : '';
+  const workerActions =
+    !isManager() && selectedTask.status === 'IN_PROGRESS'
+      ? `<button class="simpleTaskPhotoButton" type="button" data-simple-task-photo ${taskDetailActionPending ? 'disabled' : ''}>Сделать фото</button>${selectedTask.hasWorkerProgressPhoto ? `<button class="simpleTaskCompleteButton" type="button" data-simple-task-complete ${taskDetailActionPending ? 'disabled' : ''}>Завершить</button>` : ''}`
+      : '';
+  elements.simpleTaskActions.innerHTML = pausePanel + workerActions;
+  elements.simpleTaskActions.hidden = !pausePanel && !workerActions;
 }
 
 function renderTaskStep(step, index) {
@@ -1973,26 +2358,160 @@ async function hydrateDetailPhotos() {
   photoSlider.mount(views.taskDetail);
 }
 
+async function requestActiveTaskExit() {
+  if (!hasActiveWorkerTask()) return;
+  await ensureActiveWorkerTaskOpen();
+  if (selectedTask?.status !== 'IN_PROGRESS') return;
+  requestSelectedTaskPause();
+}
+
+function requestSelectedTaskPause() {
+  if (
+    pendingTaskPause ||
+    !selectedTaskId ||
+    selectedTask?.status !== 'IN_PROGRESS' ||
+    taskDetailActionPending
+  )
+    return;
+  pendingTaskPause = { taskId: selectedTaskId };
+  elements.pauseReasonError.textContent = 'Укажите причину паузы';
+  elements.taskStatusConfirmIcon.textContent = '⏸';
+  elements.taskStatusConfirmTitle.textContent = 'Поставить задачу на паузу?';
+  elements.taskStatusConfirmText.textContent = 'Работа будет временно остановлена.';
+  elements.taskStatusConfirmButton.textContent = 'Поставить на паузу';
+  elements.taskStatusConfirmButton.disabled = false;
+  elements.pauseReasonInput.value = '';
+  elements.pauseReasonInput.placeholder = 'Напишите причину...';
+  elements.pauseReasonError.hidden = true;
+  elements.pauseReasonField.hidden = false;
+  modals.taskStatusConfirm.classList.remove(
+    'is-confirm-green',
+    'is-confirm-gray',
+    'is-confirm-orange',
+    'is-confirm-yellow',
+  );
+  modals.taskStatusConfirm.classList.add('is-confirm-orange');
+  openModal('taskStatusConfirm');
+}
+
+function requestWorkerTaskResume(taskId) {
+  if (pendingTaskResume || taskDetailActionPending || !taskId) return;
+  pendingTaskResume = { taskId };
+  elements.taskStatusConfirmIcon.textContent = '▶';
+  elements.taskStatusConfirmTitle.textContent = 'Продолжить работу?';
+  elements.taskStatusConfirmText.textContent =
+    'Укажите, почему препятствие устранено и работу можно продолжить.';
+  elements.taskStatusConfirmButton.textContent = 'Продолжить работу';
+  elements.taskStatusConfirmButton.disabled = false;
+  elements.pauseReasonInput.value = '';
+  elements.pauseReasonInput.placeholder = 'Например, материал доставили…';
+  elements.pauseReasonError.textContent = 'Укажите причину продолжения';
+  elements.pauseReasonError.hidden = true;
+  elements.pauseReasonField.hidden = false;
+  modals.taskStatusConfirm.classList.remove(
+    'is-confirm-green',
+    'is-confirm-gray',
+    'is-confirm-orange',
+    'is-confirm-yellow',
+  );
+  modals.taskStatusConfirm.classList.add('is-confirm-green');
+  openModal('taskStatusConfirm');
+}
+
+async function confirmWorkerTaskResume() {
+  if (!pendingTaskResume || taskDetailActionPending) return;
+  const reason = elements.pauseReasonInput.value.trim();
+  if (!reason) {
+    elements.pauseReasonError.hidden = false;
+    elements.pauseReasonInput.focus();
+    return;
+  }
+  const request = pendingTaskResume;
+  taskDetailActionPending = true;
+  elements.taskStatusConfirmButton.disabled = true;
+  try {
+    const response = await apiFetch(`/api/v1/worker/tasks/${request.taskId}/resume`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: reason }),
+    });
+    const body = await readResponseBody(response);
+    if (!response.ok) {
+      showMessage(getApiMessage(body) || 'Не удалось продолжить работу.');
+      return;
+    }
+    pendingTaskResume = null;
+    closeModal();
+    await Promise.all([loadWorkerObjects(), loadHistory(true)]);
+    if (activeWorkerTaskId) await ensureActiveWorkerTaskOpen();
+    showMessage('Работа по задаче продолжена');
+  } catch {
+    showMessage('Не удалось продолжить работу. Проверьте соединение и повторите попытку.');
+  } finally {
+    taskDetailActionPending = false;
+    elements.taskStatusConfirmButton.disabled = false;
+    renderSelectedTaskActionState();
+  }
+}
+
+async function confirmSelectedTaskPause() {
+  if (!pendingTaskPause || taskDetailActionPending) return;
+  const reason = elements.pauseReasonInput.value.trim();
+  if (!reason) {
+    elements.pauseReasonError.hidden = false;
+    elements.pauseReasonInput.focus();
+    return;
+  }
+
+  const request = pendingTaskPause;
+  taskDetailActionPending = true;
+  elements.taskStatusConfirmButton.disabled = true;
+  if (selectedTask) renderSelectedTaskControl();
+  try {
+    const response = await apiFetch(`/api/v1/worker/tasks/${request.taskId}/pause`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: reason }),
+    });
+    const body = await readResponseBody(response);
+    if (!response.ok) {
+      showMessage(getApiMessage(body) || 'Не удалось поставить задачу на паузу.');
+      return;
+    }
+
+    if (selectedTask?.id === request.taskId) selectedTask.status = 'PAUSED';
+    clearActiveWorkerTaskState({ clearSelection: true });
+    closeModal();
+    await Promise.all([loadWorkerObjects(), loadHistory(true)]);
+    currentSection = 'tasks';
+    previousWorkingSection = 'tasks';
+    openView('myWork', { preserveScroll: true });
+    updateBottomNavigation();
+    window.scrollTo({ top: taskListScrollY, behavior: 'instant' });
+    showMessage('Сообщение отправлено руководителю');
+  } catch {
+    showMessage('Не удалось поставить задачу на паузу. Проверьте соединение и повторите попытку.');
+  } finally {
+    taskDetailActionPending = false;
+    elements.taskStatusConfirmButton.disabled = false;
+    renderSelectedTaskActionState();
+  }
+}
+
 async function runDetailAction(kind, action, id) {
+  if (kind === 'task' && action === 'pause') {
+    requestSelectedTaskPause();
+    return;
+  }
+  if (kind === 'task' && action === 'resume') {
+    requestWorkerTaskResume(id);
+    return;
+  }
   if (isTaskAccessLocked()) return notifyTaskLocked();
   if (taskDetailActionPending || !action || !id) return;
   taskDetailActionPending = true;
   renderSelectedTaskControl();
   try {
-    if (kind === 'task' && action === 'pause') {
-      const message = window.prompt('Укажите причину паузы')?.trim();
-      if (!message) return showMessage('Укажите причину паузы');
-      const response = await apiFetch(`/api/v1/worker/tasks/${id}/pause`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message }),
-      });
-      const body = await readResponseBody(response);
-      if (!response.ok)
-        return showMessage(getApiMessage(body) || 'Не удалось поставить задачу на паузу.');
-      await Promise.all([reloadTaskDetails(), loadWorkerObjects(), loadHistory(true)]);
-      return showMessage('Сообщение отправлено руководителю');
-    }
     const completesTask =
       kind === 'step' &&
       selectedTask.steps.filter((step) => step.status !== 'COMPLETED').length === 1;
@@ -2030,7 +2549,7 @@ async function runDetailAction(kind, action, id) {
     showMessage('Не удалось выполнить действие. Проверьте соединение и повторите попытку.');
   } finally {
     taskDetailActionPending = false;
-    if (selectedTask) renderSelectedTaskControl();
+    renderSelectedTaskActionState();
   }
 }
 
@@ -2061,6 +2580,7 @@ async function completeSelectedTask() {
     });
     const body = await readResponseBody(response);
     if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось завершить задачу.');
+    clearActiveWorkerTaskState({ clearSelection: true });
     calculateCompletionBonus();
     await Promise.all([loadWorkerObjects(), loadHistory(true), loadWorkerMessages()]);
     openModal('taskCompleted');
@@ -2074,6 +2594,18 @@ function openDetailPhotoPicker(stepId) {
   if (isTaskAccessLocked()) return notifyTaskLocked();
   if (taskDetailActionPending || !selectedTaskId || !stepId) return;
   void openShiftCamera('TASK_STEP', stepId);
+}
+
+function openSimpleTaskCamera(completing) {
+  if (
+    isTaskAccessLocked() ||
+    taskDetailActionPending ||
+    !selectedTaskId ||
+    selectedTask?.status !== 'IN_PROGRESS' ||
+    selectedTask.steps.length > 0
+  )
+    return;
+  void openShiftCamera(completing ? 'TASK_COMPLETE' : 'TASK_PHOTO');
 }
 
 function latestPauseForStep(stepId) {
@@ -2146,10 +2678,19 @@ async function loadManagerMessages() {
   elements.workerMessagesList.innerHTML =
     messagesResponse.ok && messages.length
       ? messages
-          .map(
-            (message) =>
-              `<article class="whiteCard messageCard"><strong>${message.kind === 'HELP_REQUEST' ? 'Нужна помощь' : 'Задача на паузе'}</strong><p>${escapeHtml(message.body)}</p><small>${escapeHtml(message.task.object?.name ?? '')} · ${escapeHtml(message.task.title)}</small><div class="stepWorkActions"><button data-manager-reply="CONTINUE" data-message-id="${message.id}">Продолжить работу</button><button data-manager-reply="STOP" data-message-id="${message.id}">Не продолжать</button></div></article>`,
-          )
+          .map((message) => {
+            const title =
+              message.kind === 'HELP_REQUEST'
+                ? 'Нужна помощь'
+                : message.kind === 'WORK_RESUMED'
+                  ? 'Сотрудник самостоятельно возобновил выполнение задачи.'
+                  : 'Сотрудник поставил задачу на паузу.';
+            const replyActions =
+              message.kind === 'WORK_RESUMED'
+                ? ''
+                : `<div class="stepWorkActions"><button data-manager-reply="CONTINUE" data-message-id="${message.id}">Продолжить работу</button><button data-manager-reply="STOP" data-message-id="${message.id}">Не продолжать</button></div>`;
+            return `<article class="whiteCard messageCard"><strong>${title}</strong><p><b>Причина:</b> ${escapeHtml(message.body)}</p><small>${escapeHtml(message.task.object?.name ?? '')} · ${escapeHtml(message.task.title)}</small>${replyActions}</article>`;
+          })
           .join('')
       : '<div class="emptyObject"><p>Новых обращений нет</p></div>';
   elements.workerArchiveList.innerHTML =
@@ -2173,7 +2714,8 @@ async function replyToWorkerMessage(messageId, decision) {
   });
   const body = await readResponseBody(response);
   if (!response.ok) return showMessage(getApiMessage(body) || 'Не удалось отправить ответ');
-  await loadManagerMessages();
+  await Promise.all([loadManagerMessages(), loadManagerTasks()]);
+  if (selectedTaskId && views.taskDetail.classList.contains('is-active')) await reloadTaskDetails();
   showMessage('Ответ отправлен сотруднику');
 }
 
@@ -2181,7 +2723,249 @@ function calculateCompletionBonus() {
   return 0;
 }
 
+async function loadAnalystWorkers({ initial = false } = {}) {
+  if (!isAnalyst()) return false;
+  if (analystLiveRequest) return analystLiveRequest;
+  const generation = ++analystRequestGeneration;
+  if (initial && !elements.analystWorkersList.children.length)
+    elements.analystWorkersList.innerHTML = analystSkeletons();
+  analystLiveRequest = (async () => {
+    try {
+      const response = await apiFetch('/api/v1/analyst/workers/live');
+      const workers = await readResponseBody(response);
+      if (!response.ok || !Array.isArray(workers)) throw new Error(getApiMessage(workers));
+      if (generation !== analystRequestGeneration || !isAnalyst()) return false;
+      renderAnalystWorkers(workers);
+      return true;
+    } catch {
+      if (generation !== analystRequestGeneration || !isAnalyst()) return false;
+      if (initial || !elements.analystWorkersList.querySelector('.analystWorkerCard'))
+        elements.analystWorkersList.innerHTML =
+          '<article class="analystErrorCard"><p>Не удалось получить актуальные данные сотрудников.</p><button class="secondaryButton" type="button" data-analyst-retry>Повторить</button></article>';
+      return false;
+    } finally {
+      analystLiveRequest = null;
+    }
+  })();
+  return analystLiveRequest;
+}
+
+function renderAnalystWorkers(workers) {
+  const signature = JSON.stringify(workers);
+  if (signature === analystLiveSignature) return;
+  analystLiveSignature = signature;
+  photoSlider.clear(elements.analystWorkersList);
+  if (!workers.length) {
+    elements.analystWorkersList.innerHTML =
+      '<div class="emptyObject"><p>Активных сотрудников пока нет</p></div>';
+    return;
+  }
+  elements.analystWorkersList.innerHTML = workers.map(renderAnalystWorkerCard).join('');
+  photoSlider.mount(elements.analystWorkersList);
+  bindAnalystTimelines(elements.analystWorkersList);
+}
+
+function renderAnalystWorkerCard(entry, options = {}) {
+  const workerName = entry.worker.name?.trim() || entry.worker.email;
+  const initial = workerName.slice(0, 1).toUpperCase();
+  const shift = entry.activeShift ?? entry.shift ?? null;
+  const frames = Array.isArray(entry.timeline) ? entry.timeline : [];
+  const status = entry.status ?? (shift?.status === 'FINISHED' ? 'SHIFT_COMPLETED' : 'ON_SHIFT');
+  const statusLabel = entry.statusLabel ?? analystStatusLabel(status);
+  const workerKey = options.workerKey ?? entry.worker.id;
+  const shiftText = shift?.startedAt
+    ? `<p class="analystShiftTime">Смена с ${formatAnalystTime(shift.startedAt)}</p>`
+    : '';
+  const taskText = entry.activeTask?.title
+    ? `<p class="analystCurrentTask">${escapeHtml(entry.activeTask.title)}</p>`
+    : '';
+  const timeline = shift
+    ? renderAnalystTimeline(frames, shift.id, workerKey)
+    : '<div class="analystNoShift"><span>Смена не начата</span></div>';
+  return `<article class="analystWorkerCard is-${status.toLowerCase().replaceAll('_', '-')}"><header class="analystWorkerHeader"><span class="analystAvatar" aria-hidden="true">${escapeHtml(initial)}</span><div><h2>${escapeHtml(workerName)}</h2><span class="analystStatus">${escapeHtml(statusLabel)}</span>${shiftText}${taskText}</div></header>${timeline}</article>`;
+}
+
+function renderAnalystTimeline(frames, shiftId, workerKey) {
+  if (!frames.length)
+    return '<div class="analystNoShift"><span>События смены ещё не зафиксированы</span></div>';
+  const photos = frames.map((frame) => ({
+    id: frame.artifact?.id ?? null,
+    originalFileName: frame.artifact?.originalFileName ?? frame.title,
+  }));
+  const selectedIndex = analystFrameIndexStore.get(workerKey, frames.length);
+  const slider = PhotoSlider.render(photos, {
+    id: `analyst-shift-${shiftId}`,
+    showEmpty: false,
+  });
+  const captions = frames
+    .map(
+      (frame, index) =>
+        `<div class="analystFrameCaption" data-analyst-caption="${index}" data-frame-id="${escapeHtml(frame.id)}"${index === selectedIndex ? '' : ' hidden'}><strong>${escapeHtml(frame.title)}</strong>${frame.description ? `<p>«${escapeHtml(frame.description)}»</p>` : ''}${frame.reason ? `<p><b>Причина:</b> ${escapeHtml(frame.reason)}</p>` : ''}${renderAnalystFrameFacts(frame)}<time datetime="${escapeHtml(frame.occurredAt)}">${formatAnalystTime(frame.occurredAt)}</time></div>`,
+    )
+    .join('');
+  return `<section class="analystTimeline" data-analyst-timeline data-analyst-worker-id="${escapeHtml(workerKey)}" data-initial-frame="${selectedIndex}">${slider}<div class="analystFramePosition">Кадр <span>${selectedIndex + 1}</span> из ${frames.length}</div>${captions}</section>`;
+}
+
+function renderAnalystFrameFacts(frame) {
+  const facts = [];
+  if (Number.isFinite(frame.taskDurationMinutes))
+    facts.push(`Время выполнения: ${formatAnalystDuration(frame.taskDurationMinutes)}`);
+  if (frame.kind === 'TASK_COMPLETED')
+    facts.push(
+      Number.isFinite(frame.taskCoins)
+        ? `Стоимость: ${formatAnalystCoins(frame.taskCoins)}`
+        : 'Стоимость рассчитывается',
+    );
+  if (frame.kind === 'SHIFT_COMPLETED') {
+    const metadata = frame.metadata ?? {};
+    if (Number.isFinite(metadata.shiftDurationMinutes))
+      facts.push(
+        `Продолжительность смены: ${formatAnalystDuration(metadata.shiftDurationMinutes)}`,
+      );
+    if (Number.isFinite(metadata.completedTaskCount))
+      facts.push(`Завершено задач: ${metadata.completedTaskCount}`);
+    facts.push(
+      Number.isFinite(metadata.shiftCoinUnits)
+        ? `Начислено: ${formatAnalystCoins(metadata.shiftCoinUnits)}`
+        : 'Начисление ожидается',
+    );
+  }
+  return facts.map((fact) => `<p>${escapeHtml(fact)}</p>`).join('');
+}
+
+function bindAnalystTimelines(root) {
+  for (const timeline of root.querySelectorAll('[data-analyst-timeline]')) {
+    const carousel = timeline.querySelector('[data-photo-carousel]');
+    if (!carousel) continue;
+    const update = () => updateAnalystTimeline(timeline);
+    carousel.addEventListener('scroll', update, { passive: true });
+    carousel.addEventListener('scrollend', update, { passive: true });
+    carousel.addEventListener('pointerup', () => window.requestAnimationFrame(update), {
+      passive: true,
+    });
+    const initialIndex = Number(timeline.dataset.initialFrame ?? 0);
+    window.requestAnimationFrame(() => {
+      const slide = carousel.querySelectorAll('[data-photo-slide]')[initialIndex];
+      if (slide) carousel.scrollLeft = slide.offsetLeft;
+      update();
+    });
+  }
+}
+
+function updateAnalystTimeline(timeline) {
+  const carousel = timeline.querySelector('[data-photo-carousel]');
+  const slides = [...carousel.querySelectorAll('[data-photo-slide]')];
+  if (!slides.length) return;
+  const index = AnalystTimeline.findActiveIndex(slides, carousel.scrollLeft, carousel.clientWidth);
+  if (index < 0) return;
+  for (const caption of timeline.querySelectorAll('[data-analyst-caption]'))
+    caption.hidden = Number(caption.dataset.analystCaption) !== index;
+  const counter = timeline.querySelector('.analystFramePosition span');
+  if (counter) counter.textContent = String(index + 1);
+  const workerId = timeline.dataset.analystWorkerId;
+  const captions = timeline.querySelectorAll('[data-analyst-caption]');
+  analystFrameIndexStore.set(workerId, index);
+  timeline.dataset.initialFrame = String(Math.min(index, captions.length - 1));
+}
+
+async function loadAnalystHistory() {
+  if (!isAnalyst()) return false;
+  elements.historyHeading.textContent = 'История смен';
+  elements.historyMoreButton.hidden = true;
+  elements.historyList.innerHTML = '<p>Загружаем завершённые смены…</p>';
+  try {
+    const response = await apiFetch('/api/v1/analyst/shifts/history');
+    const shifts = await readResponseBody(response);
+    if (!response.ok || !Array.isArray(shifts)) throw new Error();
+    elements.historyList.innerHTML = shifts.length
+      ? renderAnalystHistory(shifts)
+      : '<div class="emptyObject"><p>Завершённых смен пока нет</p></div>';
+    return true;
+  } catch {
+    elements.historyList.innerHTML =
+      '<article class="analystErrorCard"><p>Не удалось загрузить историю смен.</p><button class="secondaryButton" type="button" data-section="history">Повторить</button></article>';
+    return false;
+  }
+}
+
+function renderAnalystHistory(shifts) {
+  const groups = new Map();
+  for (const shift of shifts) {
+    const date = new Date(shift.finishedAt).toLocaleDateString('ru-RU');
+    groups.set(date, [...(groups.get(date) ?? []), shift]);
+  }
+  return [...groups.entries()]
+    .map(
+      ([date, items]) =>
+        `<section class="analystHistoryGroup"><h2>${escapeHtml(date)}</h2>${items
+          .map((shift) => {
+            const name = shift.worker.name?.trim() || shift.worker.email;
+            const coins = Number.isFinite(shift.coinUnits)
+              ? formatAnalystCoins(shift.coinUnits)
+              : 'ожидается';
+            return `<button class="analystHistoryShift" type="button" data-analyst-shift-id="${escapeHtml(shift.id)}"><strong>${escapeHtml(name)}</strong><span>${formatAnalystTime(shift.startedAt)}–${formatAnalystTime(shift.finishedAt)}</span><small>${shift.completedTaskCount} задач · ${escapeHtml(coins)}</small></button>`;
+          })
+          .join('')}</section>`,
+    )
+    .join('');
+}
+
+async function loadAnalystShift(shiftId) {
+  elements.historyList.innerHTML = '<p>Загружаем смену…</p>';
+  try {
+    const response = await apiFetch(`/api/v1/analyst/shifts/${encodeURIComponent(shiftId)}`);
+    const detail = await readResponseBody(response);
+    if (!response.ok) throw new Error();
+    const workerKey = `history:${shiftId}`;
+    elements.historyHeading.textContent = detail.worker.name || detail.worker.email;
+    elements.historyList.innerHTML = `<button class="textButton analystHistoryBack" type="button" data-analyst-history-back>← Все смены</button>${renderAnalystWorkerCard(detail, { workerKey })}`;
+    photoSlider.mount(elements.historyList);
+    bindAnalystTimelines(elements.historyList);
+  } catch {
+    elements.historyList.innerHTML =
+      '<article class="analystErrorCard"><p>Не удалось открыть смену.</p><button class="secondaryButton" type="button" data-analyst-history-back>Вернуться</button></article>';
+  }
+}
+
+function analystSkeletons() {
+  return Array.from(
+    { length: 3 },
+    () =>
+      '<article class="analystWorkerCard analystSkeleton" aria-hidden="true"><span></span><i></i><b></b></article>',
+  ).join('');
+}
+
+function analystStatusLabel(status) {
+  return (
+    {
+      RESTING: 'Отдыхает',
+      ON_SHIFT: 'На смене',
+      WORKING: 'Выполняет задачу',
+      PAUSED: 'Пауза',
+      WAITING_FOR_RESPONSE: 'Ожидает ответа',
+      SHIFT_COMPLETED: 'Смена завершена',
+    }[status] ?? status
+  );
+}
+
+function formatAnalystTime(value) {
+  return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(
+    new Date(value),
+  );
+}
+
+function formatAnalystDuration(minutes) {
+  const safe = Math.max(0, Math.round(minutes));
+  if (safe < 60) return `${safe} мин`;
+  return `${Math.floor(safe / 60)} ч${safe % 60 ? ` ${safe % 60} мин` : ''}`;
+}
+
+function formatAnalystCoins(units) {
+  return `${formatCoinUnits(Math.round(units))} монет`;
+}
+
 async function loadHistory(reset) {
+  if (isAnalyst()) return loadAnalystHistory();
   if (reset) {
     historyCursor = null;
     elements.historyList.innerHTML = '<p>Загружаем историю…</p>';
@@ -2266,7 +3050,8 @@ function eventLabel(type) {
       WORK_SHIFT_STARTED: 'Открыл смену',
       WORK_SHIFT_FINISHED: 'Закрыл смену',
       TASK_ACCEPTED: 'Принял задачу',
-      TASK_STARTED: 'Начал задачу',
+      TASK_STARTED: 'Принял задачу и начал работу',
+      TASK_RESUMED: 'Работа продолжена',
       TASK_COMPLETED: 'Завершил задачу',
       STEP_STARTED: 'Начал этап',
       STEP_COMPLETED: 'Завершил этап',
@@ -2285,7 +3070,7 @@ function taskStatusLabel(status) {
       ASSIGNED: 'Не начата',
       IN_PROGRESS: 'В работе',
       ACCEPTED: 'Принята',
-      PAUSED: 'На паузе',
+      PAUSED: isManager() ? 'Ожидает ответа руководителя' : 'На паузе',
       ON_REVIEW: 'На проверке',
       COMPLETED: 'Выполнена',
     }[status] ?? status
@@ -2360,6 +3145,7 @@ async function handleApiFailure(status, body, options = {}) {
 
 function handleUnauthorized() {
   clearAuthToken();
+  stopAnalystPolling();
   stopCameraStream();
   cleanupCameraAttempt({ keepOperationId: false });
   closeModal();
@@ -2417,6 +3203,10 @@ async function openShiftCamera(mode, taskStepId = null) {
     isSubmitting: false,
     facingMode: 'environment',
     cameraCount: 0,
+    filePickerFallback: false,
+    fileName: null,
+    mimeType: 'image/jpeg',
+    taskId: mode.startsWith('TASK_') ? selectedTaskId : null,
     taskStepId,
   };
 
@@ -2425,13 +3215,19 @@ async function openShiftCamera(mode, taskStepId = null) {
       ? 'Фото перед началом смены'
       : mode === 'TASK_STEP'
         ? 'Фото текущего этапа'
-        : 'Фото перед завершением смены';
+        : mode === 'TASK_PHOTO'
+          ? 'Фото выполняемой задачи'
+          : mode === 'TASK_COMPLETE'
+            ? 'Итоговая фотофиксация'
+            : 'Фото перед завершением смены';
   elements.shiftCameraText.textContent =
     mode === 'START'
       ? 'Расположите лицо в кадре и сделайте фотографию.'
-      : mode === 'TASK_STEP'
-        ? 'Сделайте фотографию выполненной работы.'
-        : 'Сделайте фотографию для подтверждения завершения смены.';
+      : ['TASK_STEP', 'TASK_PHOTO'].includes(mode)
+        ? 'Сделайте фотографию выполняемой работы.'
+        : mode === 'TASK_COMPLETE'
+          ? 'После подтверждения фотографии задача будет завершена.'
+          : 'Сделайте фотографию для подтверждения завершения смены.';
 
   resetCameraUi();
   openModal('shiftCamera');
@@ -2444,7 +3240,7 @@ async function startCameraStream(facingMode = cameraAttempt.facingMode || 'envir
   elements.shiftCameraCaptureButton.disabled = true;
 
   if (!navigator.mediaDevices?.getUserMedia) {
-    setCameraError('Камера недоступна на этом устройстве или в этом браузере.');
+    enableCameraFileFallback(true);
     return;
   }
 
@@ -2475,11 +3271,60 @@ async function startCameraStream(facingMode = cameraAttempt.facingMode || 'envir
     elements.shiftCameraFlipButton.hidden = cameraAttempt.cameraCount < 2;
     return true;
   } catch {
-    setCameraError(
-      'Не удалось получить доступ к камере. Разрешите использование камеры в настройках браузера и повторите попытку.',
-    );
+    enableCameraFileFallback(true);
     return false;
   }
+}
+
+function enableCameraFileFallback(openPicker = false) {
+  cameraAttempt.filePickerFallback = true;
+  stopCameraStream();
+  elements.shiftCameraVideo.hidden = true;
+  elements.shiftCameraState.hidden = false;
+  elements.shiftCameraState.textContent = 'Выберите фотографию на устройстве.';
+  elements.shiftCameraError.hidden = true;
+  elements.shiftCameraFlipButton.hidden = true;
+  elements.shiftCameraCaptureButton.hidden = false;
+  elements.shiftCameraCaptureButton.disabled = false;
+  elements.shiftCameraCaptureButton.textContent = 'Выбрать фото';
+  if (openPicker) {
+    elements.shiftCameraFileInput.value = '';
+    elements.shiftCameraFileInput.click();
+  }
+}
+
+async function handleCameraFileSelection() {
+  const file = elements.shiftCameraFileInput.files?.[0];
+  elements.shiftCameraFileInput.value = '';
+  if (!file) return;
+  if (
+    !['image/jpeg', 'image/webp'].includes(file.type) ||
+    file.size <= 0 ||
+    file.size > 10_485_760
+  ) {
+    setCameraError('Выберите фотографию JPEG или WebP размером не более 10 МБ.');
+    return;
+  }
+  clearCameraPreview();
+  cameraAttempt.blob = file;
+  cameraAttempt.fileName = file.name;
+  cameraAttempt.mimeType = file.type;
+  cameraAttempt.previewUrl = URL.createObjectURL(file);
+  try {
+    await loadPreviewImage(elements.shiftCameraPreview, cameraAttempt.previewUrl);
+  } catch {
+    clearCameraPreview();
+    setCameraError('Не удалось отобразить фотографию. Выберите другой файл.');
+    return;
+  }
+  elements.shiftCameraPreview.hidden = false;
+  elements.shiftCameraVideo.hidden = true;
+  elements.shiftCameraState.hidden = true;
+  elements.shiftCameraCaptureButton.hidden = true;
+  elements.shiftCameraRetakeButton.hidden = false;
+  elements.shiftCameraConfirmButton.hidden = false;
+  elements.shiftCameraConfirmButton.disabled = false;
+  elements.shiftCameraError.hidden = true;
 }
 
 async function flipCamera() {
@@ -2493,6 +3338,11 @@ async function flipCamera() {
 }
 
 async function captureCameraPhoto() {
+  if (cameraAttempt.filePickerFallback) {
+    elements.shiftCameraFileInput.value = '';
+    elements.shiftCameraFileInput.click();
+    return;
+  }
   if (!cameraAttempt.stream || cameraAttempt.isSubmitting) {
     return;
   }
@@ -2538,6 +3388,8 @@ async function captureCameraPhoto() {
 
   clearCameraPreview();
   cameraAttempt.blob = blob;
+  cameraAttempt.fileName = `${cameraAttempt.mode.toLowerCase()}-photo.jpg`;
+  cameraAttempt.mimeType = 'image/jpeg';
   cameraAttempt.previewUrl = URL.createObjectURL(blob);
   try {
     await loadPreviewImage(elements.shiftCameraPreview, cameraAttempt.previewUrl);
@@ -2622,6 +3474,10 @@ async function retakeCameraPhoto() {
   elements.shiftCameraConfirmButton.hidden = true;
   elements.shiftCameraConfirmButton.disabled = true;
   elements.shiftCameraFlipButton.hidden = cameraAttempt.cameraCount < 2;
+  if (cameraAttempt.filePickerFallback) {
+    elements.shiftCameraFileInput.click();
+    return;
+  }
   await startCameraStream();
 }
 
@@ -2639,13 +3495,19 @@ async function submitCameraPhoto() {
   const formData = new FormData();
   formData.append(
     'file',
-    new File([cameraAttempt.blob], `${cameraAttempt.mode.toLowerCase()}-photo.jpg`, {
-      type: 'image/jpeg',
-    }),
+    new File(
+      [cameraAttempt.blob],
+      cameraAttempt.fileName || `${cameraAttempt.mode.toLowerCase()}-photo.jpg`,
+      {
+        type: cameraAttempt.mimeType || 'image/jpeg',
+      },
+    ),
   );
-  if (cameraAttempt.mode === 'TASK_STEP') {
-    formData.append('taskId', selectedTaskId);
-    formData.append('taskStepId', cameraAttempt.taskStepId);
+  if (['TASK_STEP', 'TASK_PHOTO'].includes(cameraAttempt.mode)) {
+    formData.append('taskId', cameraAttempt.taskId);
+    if (cameraAttempt.mode === 'TASK_STEP') formData.append('taskStepId', cameraAttempt.taskStepId);
+    formData.append('operationId', cameraAttempt.operationId);
+  } else if (cameraAttempt.mode === 'TASK_COMPLETE') {
     formData.append('operationId', cameraAttempt.operationId);
   } else {
     formData.append('capturedAt', new Date().toISOString());
@@ -2659,7 +3521,11 @@ async function submitCameraPhoto() {
         ? '/api/v1/work-shifts/start-with-photo'
         : cameraAttempt.mode === 'TASK_STEP'
           ? '/api/v1/artifacts/photos'
-          : '/api/v1/work-shifts/finish-with-photo';
+          : cameraAttempt.mode === 'TASK_PHOTO'
+            ? '/api/v1/artifacts/photos'
+            : cameraAttempt.mode === 'TASK_COMPLETE'
+              ? `/api/v1/tasks/${cameraAttempt.taskId}/complete-with-photo`
+              : '/api/v1/work-shifts/finish-with-photo';
     const response = await apiFetch(endpoint, {
       method: 'POST',
       body: formData,
@@ -2678,9 +3544,17 @@ async function submitCameraPhoto() {
     const submittedMode = cameraAttempt.mode;
     cleanupCameraAttempt({ keepOperationId: false });
     closeModal();
-    if (submittedMode === 'TASK_STEP')
+    if (['TASK_STEP', 'TASK_PHOTO'].includes(submittedMode))
       await Promise.all([reloadTaskDetails(), loadWorkerObjects(), loadHistory(true)]);
-    else await refreshShiftState();
+    else if (submittedMode === 'TASK_COMPLETE') {
+      clearActiveWorkerTaskState({ clearSelection: true });
+      await Promise.all([loadWorkerObjects(), loadHistory(true), loadWorkerMessages()]);
+      currentSection = 'tasks';
+      previousWorkingSection = 'tasks';
+      openView('myWork', { preserveScroll: true });
+      updateBottomNavigation();
+      showMessage('Задача завершена');
+    } else await restoreWorkerWorkspace();
   } catch {
     cameraAttempt.isSubmitting = false;
     elements.shiftCameraConfirmButton.disabled = false;
@@ -2703,6 +3577,7 @@ function resetCameraUi() {
   elements.shiftCameraError.hidden = true;
   elements.shiftCameraCaptureButton.hidden = false;
   elements.shiftCameraCaptureButton.disabled = true;
+  elements.shiftCameraCaptureButton.textContent = 'Сделать фото';
   elements.shiftCameraRetakeButton.hidden = true;
   elements.shiftCameraRetakeButton.disabled = false;
   elements.shiftCameraConfirmButton.hidden = true;
@@ -2740,6 +3615,10 @@ function cleanupCameraAttempt({ keepOperationId }) {
     isSubmitting: false,
     facingMode: keepOperationId ? cameraAttempt.facingMode : 'environment',
     cameraCount: keepOperationId ? cameraAttempt.cameraCount : 0,
+    filePickerFallback: keepOperationId ? cameraAttempt.filePickerFallback : false,
+    fileName: null,
+    mimeType: 'image/jpeg',
+    taskId: keepOperationId ? cameraAttempt.taskId : null,
     taskStepId: keepOperationId ? cameraAttempt.taskStepId : null,
   };
 }
@@ -2760,6 +3639,8 @@ function clearCameraPreview() {
 
   cameraAttempt.previewUrl = null;
   cameraAttempt.blob = null;
+  cameraAttempt.fileName = null;
+  cameraAttempt.mimeType = 'image/jpeg';
   elements.shiftCameraPreview.removeAttribute('src');
   elements.shiftCameraCanvas.width = 0;
   elements.shiftCameraCanvas.height = 0;

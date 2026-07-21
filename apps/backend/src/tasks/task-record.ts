@@ -12,7 +12,9 @@ export interface TaskRecord {
   assigneeId: string | null;
   processId: string;
   objectId?: string | null;
+  startedAt: Date | null;
   completedAt: Date | null;
+  completedWorkShiftId: string | null;
   deletedAt: Date | null;
   deletedByUserId: string | null;
   deletionReason: string | null;

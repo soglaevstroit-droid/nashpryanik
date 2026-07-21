@@ -22,6 +22,16 @@ export class TaskMessageController {
     return this.messages.pause(user, taskId, body);
   }
 
+  @Post('worker/tasks/:taskId/resume')
+  @Roles('WORKER')
+  resume(
+    @CurrentUser() user: AuthUser,
+    @Param('taskId') taskId: string,
+    @Body('message') body: string,
+  ) {
+    return this.messages.resume(user, taskId, body);
+  }
+
   @Post('worker/tasks/:taskId/help')
   @Roles('WORKER')
   help(
